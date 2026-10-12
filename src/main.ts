@@ -16,6 +16,7 @@ app.innerHTML = `
   </p>
   <p>
     rows <input id="rows" type="number" value="300" min="1" style="width:5em">
+    chunk bytes <input id="chunk" type="number" value="${SEND_DEFAULTS.chunkSize}" min="1" max="237" style="width:4em">
     chunk delay ms <input id="delay" type="number" value="${SEND_DEFAULTS.delayMs}" min="0" style="width:4em">
     band pause ms <input id="pause" type="number" value="${SEND_DEFAULTS.partPauseMs}" min="0" style="width:4em">
     <button id="long">Print long pattern</button>
@@ -46,14 +47,21 @@ const run = exclusive(
   () => log('busy: wait for the current operation to finish'),
 )
 
-async function printCanvas(canvas: HTMLCanvasElement, delayMs: number, partPauseMs: number) {
+async function printCanvas(
+  canvas: HTMLCanvasElement,
+  chunkSize: number,
+  delayMs: number,
+  partPauseMs: number,
+) {
   const ctx = canvas.getContext('2d')!
   const img = ctx.getImageData(0, 0, canvas.width, canvas.height)
   const job = buildPrintJob(img)
   const total = job.reduce((n, p) => n + p.length, 0)
-  log(`sending ${total} bytes in ${job.length} parts (delay ${delayMs} ms, band pause ${partPauseMs} ms)`)
+  log(
+    `sending ${total} bytes in ${job.length} parts (chunk ${chunkSize} B, delay ${delayMs} ms, band pause ${partPauseMs} ms)`,
+  )
   const started = performance.now()
-  await sendBytes(printer, job, { delayMs, partPauseMs })
+  await sendBytes(printer, job, { chunkSize, delayMs, partPauseMs })
   const secs = (performance.now() - started) / 1000
   log(`sent in ${secs.toFixed(1)} s, ${(total / 1024 / secs).toFixed(1)} KiB/s`)
 }
@@ -71,8 +79,12 @@ document.getElementById('status')!.addEventListener('click', () =>
   }),
 )
 document.getElementById('ruler')!.addEventListener('click', () =>
-  run('ruler', () => printCanvas(drawRuler(), SEND_DEFAULTS.delayMs, SEND_DEFAULTS.partPauseMs)),
+  run('ruler', () =>
+    printCanvas(drawRuler(), SEND_DEFAULTS.chunkSize, SEND_DEFAULTS.delayMs, SEND_DEFAULTS.partPauseMs),
+  ),
 )
 document.getElementById('long')!.addEventListener('click', () =>
-  run('long', () => printCanvas(drawLongPattern(num('rows')), num('delay'), num('pause'))),
+  run('long', () =>
+    printCanvas(drawLongPattern(num('rows')), num('chunk'), num('delay'), num('pause')),
+  ),
 )

@@ -69,3 +69,19 @@ Render everything (receipt text, shipping labels, QR, barcodes) to a 576-pixel-w
 - Whether a cutter exists, print density and speed settings, and the effect of `ESC 3`/`ESC 2` line spacing.
 - Battery level reading, and which command caused the paper feed.
 - Web Bluetooth is not available in Safari; the app needs Chrome or Edge.
+
+## Browser spike results (partial, 2026-10-12)
+
+Measured from Chrome on macOS over Web Bluetooth using the spike page, defaults of 200-byte chunks, 30 ms delay, 0 ms band pause, 128-row bands, write-with-response. Chrome version was not recorded.
+
+| Rows | Bytes | Parts | Time | Rate | Result |
+|---|---|---|---|---|---|
+| 64 (ruler) | 4,621 | 3 | 1.5 s | 3.0 KiB/s | printed solid |
+| 300 | 21,629 | 5 | 6.9 s | 3.1 KiB/s | printed solid |
+| 600 | 43,245 | 7 | 34.2 s | 1.2 KiB/s | printed solid, but 2.5x slower than expected; cause unknown |
+| 1200 | 86,485 | 12 | 26.9 s | 3.1 KiB/s | printed solid |
+| 2400 | 172,957 | 21 | failed after 16,426 bytes | | printer ran out of battery; Chrome reported `NotSupportedError: GATT operation failed for unknown reason` |
+
+What this establishes: the browser path works end to end, and jobs up to 1200 rows (86 KB) print with no dropped or reordered data at 30 ms between 200-byte chunks. The link rate of about 3.1 KiB/s is roughly 63 ms per chunk (30 ms delay plus about 33 ms acknowledgement). The print engine (60 to 70 mm/s listed) can consume far more than that, so no buffer overrun was seen and the link is the bottleneck.
+
+Not established: whether 2400 rows (or any larger single job) prints, since the failure coincided with the battery dying; the smallest safe chunk delay; whether 237-byte chunks work; the cause of the slow 600-row run; whether Chrome asks to re-pair after a reload; and the status reply (the Status button was not recorded). A repeat on a charged battery, trying delay 10 and 0 and 237-byte chunks at 1200 rows, then 2400 rows twice, would settle these. If 2400 rows fails at about 16 KB again on a full charge, the failure is not battery related.
