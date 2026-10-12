@@ -259,9 +259,11 @@ export interface JobOptions extends RasterOptions {
 }
 
 // Alpha is composited onto white, so a transparent pixel always prints as paper.
+// Luminance is rounded to an integer so a pixel exactly at the threshold does
+// not flip on floating-point error.
 function isBlack(data: Uint8ClampedArray, i: number, threshold: number): boolean {
   const alpha = data[i + 3] / 255
-  const luminance = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2]
+  const luminance = Math.round(0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2])
   return 255 - (255 - luminance) * alpha < threshold
 }
 
