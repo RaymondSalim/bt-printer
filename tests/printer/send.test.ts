@@ -80,10 +80,10 @@ describe('sendBytes', () => {
     expect(delays.filter((d) => d === 50)).toHaveLength(2)
   })
 
-  it('stops and reports bytes sent when aborted', async () => {
+  it('finishes the part in flight when aborted, then stops at the part boundary', async () => {
     const { sink, writes } = recordingSink()
     const controller = new AbortController()
-    const run = sendBytes(sink, [bytes(600)], {
+    const run = sendBytes(sink, [bytes(450), bytes(450)], {
       chunkSize: 200,
       sleep: noSleep,
       signal: controller.signal,
@@ -94,10 +94,20 @@ describe('sendBytes', () => {
     await expect(run).rejects.toMatchObject({
       name: 'PrintInterruptedError',
       reason: 'aborted',
-      bytesSent: 200,
-      totalBytes: 600,
+      bytesSent: 450,
+      totalBytes: 900,
     })
-    expect(writes).toHaveLength(1)
+    expect(writes.map((w) => w.length)).toEqual([200, 200, 50])
+  })
+
+  it('does not start any part when already aborted', async () => {
+    const { sink, writes } = recordingSink()
+    const controller = new AbortController()
+    controller.abort()
+    await expect(
+      sendBytes(sink, [bytes(100)], { sleep: noSleep, signal: controller.signal }),
+    ).rejects.toMatchObject({ reason: 'aborted', bytesSent: 0, totalBytes: 100 })
+    expect(writes).toHaveLength(0)
   })
 
   it('stops and reports bytes sent when a write fails', async () => {

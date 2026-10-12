@@ -78,6 +78,19 @@ describe('rasterBands', () => {
     ])
   })
 
+  it('places each source row in the band and offset it belongs to', () => {
+    const marked = [5, 129, 299]
+    const img = makeImage(300, (x, y) => (marked.includes(y) && x === 0 ? BLACK : WHITE))
+    const bands = rasterBands(img, { bandRows: 128 })
+    const firstByteOfRow = (band: Uint8Array, row: number) => band[8 + row * ROW_BYTES]
+    const blackRows = bands.flatMap((band, b) =>
+      Array.from({ length: band.length > 8 ? (band.length - 8) / ROW_BYTES : 0 }, (_, r) => r)
+        .filter((r) => firstByteOfRow(band, r) === 0x80)
+        .map((r) => b * 128 + r),
+    )
+    expect(blackRows).toEqual(marked)
+  })
+
   it('splits the row count across yL and yH for heights above 255', () => {
     const [band] = rasterBands(makeImage(300, () => BLACK), { bandRows: 300 })
     expect(band[6]).toBe(300 & 0xff)

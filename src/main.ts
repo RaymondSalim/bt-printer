@@ -3,6 +3,7 @@ import { PrintInterruptedError, SEND_DEFAULTS, sendBytes } from './printer/send'
 import { readStatus } from './printer/status'
 import { WebBluetoothPrinter } from './printer/webBluetooth'
 import { drawLongPattern, drawRuler } from './spike/patterns'
+import { exclusive } from './util/exclusive'
 
 const printer = new WebBluetoothPrinter()
 const app = document.getElementById('app')!
@@ -28,17 +29,22 @@ const log = (msg: string) => {
 }
 const num = (id: string) => Number((document.getElementById(id) as HTMLInputElement).value)
 
-async function run(label: string, fn: () => Promise<void>) {
-  try {
-    await fn()
-  } catch (err) {
-    if (err instanceof PrintInterruptedError) {
-      log(`${label} FAILED: ${err.message} (${err.reason})`)
-    } else {
-      log(`${label} FAILED: ${err instanceof Error ? err.message : String(err)}`)
+// One operation at a time: overlapping writes or a status query in the middle of
+// a raster job would interleave bytes on the same characteristic.
+const run = exclusive(
+  async (label: string, fn: () => Promise<void>) => {
+    try {
+      await fn()
+    } catch (err) {
+      if (err instanceof PrintInterruptedError) {
+        log(`${label} FAILED: ${err.message} (${err.reason}); cause: ${String(err.cause)}`)
+      } else {
+        log(`${label} FAILED: ${err instanceof Error ? err.message : String(err)}`)
+      }
     }
-  }
-}
+  },
+  () => log('busy: wait for the current operation to finish'),
+)
 
 async function printCanvas(canvas: HTMLCanvasElement, delayMs: number, partPauseMs: number) {
   const ctx = canvas.getContext('2d')!

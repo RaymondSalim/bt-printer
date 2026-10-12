@@ -32,6 +32,7 @@ const defaultSleep = (ms: number) => new Promise<void>((resolve) => setTimeout(r
 
 interface Step {
   chunk: Uint8Array
+  startsPart: boolean
   endsPart: boolean
 }
 
@@ -53,6 +54,7 @@ export async function sendBytes(
     for (let offset = 0; offset < part.length; offset += chunkSize) {
       steps.push({
         chunk: part.slice(offset, offset + chunkSize),
+        startsPart: offset === 0,
         endsPart: offset + chunkSize >= part.length,
       })
     }
@@ -61,7 +63,9 @@ export async function sendBytes(
 
   let sent = 0
   for (let i = 0; i < steps.length; i++) {
-    if (opts.signal?.aborted) {
+    // An abort is honored only between parts. Stopping inside a raster band would
+    // leave the printer waiting for the rest of that command and swallow the next job.
+    if (steps[i].startsPart && opts.signal?.aborted) {
       throw new PrintInterruptedError('aborted', sent, total, opts.signal.reason)
     }
     try {
