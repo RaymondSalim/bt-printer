@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
+  DEFAULT_BAND_ROWS,
+  DEFAULT_TAIL_ROWS,
   PRINT_WIDTH_DOTS,
   ROW_BYTES,
   buildPrintJob,
@@ -98,12 +100,41 @@ describe('rasterBands', () => {
   })
 })
 
+const rowsOf = (bands: Uint8Array[]) => bands.reduce((sum, b) => sum + (b[6] | (b[7] << 8)), 0)
+
 describe('buildPrintJob', () => {
-  it('wraps the bands in ESC @ and a trailing feed', () => {
+  it('pins the hardware-verified band size and tail clearance', () => {
+    expect(DEFAULT_BAND_ROWS).toBe(32)
+    expect(DEFAULT_TAIL_ROWS).toBe(96)
+  })
+
+  it('starts with ESC @ and ends with raster, with no feed command by default', () => {
     const job = buildPrintJob(makeImage(2, () => BLACK))
     expect([...job[0]]).toEqual([0x1b, 0x40])
-    expect(job).toHaveLength(3)
-    expect([...job[2]]).toEqual([0x1b, 0x64, 4])
+    expect(job.slice(1).every((p) => p[0] === 0x1d && p[1] === 0x76)).toBe(true)
+  })
+
+  it('appends blank rows after the image so its end clears the tear bar', () => {
+    const job = buildPrintJob(makeImage(2, () => BLACK))
+    const bands = job.slice(1)
+    expect(rowsOf(bands)).toBe(2 + DEFAULT_TAIL_ROWS)
+    expect(bands).toHaveLength(Math.ceil((2 + DEFAULT_TAIL_ROWS) / DEFAULT_BAND_ROWS))
+    const first = bands[0]
+    expect(first.slice(8, 8 + 2 * ROW_BYTES).every((b) => b === 0xff)).toBe(true)
+    expect(first.slice(8 + 2 * ROW_BYTES).every((b) => b === 0)).toBe(true)
+    expect(bands.slice(1).every((b) => b.slice(8).every((v) => v === 0))).toBe(true)
+  })
+
+  it('honors a custom tail length, including none', () => {
+    const img = makeImage(5, () => BLACK)
+    expect(rowsOf(buildPrintJob(img, { tailRows: 0 }).slice(1))).toBe(5)
+    expect(rowsOf(buildPrintJob(img, { tailRows: 10 }).slice(1))).toBe(15)
+  })
+
+  it('rejects an invalid tail length', () => {
+    const img = makeImage(1, () => BLACK)
+    expect(() => buildPrintJob(img, { tailRows: -1 })).toThrow(/tail/i)
+    expect(() => buildPrintJob(img, { tailRows: 1.5 })).toThrow(/tail/i)
   })
 
   it('uses the requested feed length', () => {

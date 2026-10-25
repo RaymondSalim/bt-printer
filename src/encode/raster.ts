@@ -1,6 +1,11 @@
 export const PRINT_WIDTH_DOTS = 576
 export const ROW_BYTES = PRINT_WIDTH_DOTS / 8
-export const DEFAULT_BAND_ROWS = 128
+// Bands of 32 rows (2.3 KB) paired with a pause after each band keep the sender
+// from outrunning the printer's small input buffer on dense content.
+export const DEFAULT_BAND_ROWS = 32
+// The tear bar sits about 70 rows past the print head, so the last rows of a
+// print stay inside the printer unless blank rows follow them.
+export const DEFAULT_TAIL_ROWS = 96
 export const DEFAULT_THRESHOLD = 128
 
 export interface RgbaImage {
@@ -15,6 +20,7 @@ export interface RasterOptions {
 }
 
 export interface JobOptions extends RasterOptions {
+  tailRows?: number
   feedLines?: number
 }
 
@@ -60,9 +66,24 @@ export function rasterBands(img: RgbaImage, opts: RasterOptions = {}): Uint8Arra
 }
 
 export function buildPrintJob(img: RgbaImage, opts: JobOptions = {}): Uint8Array[] {
-  const feedLines = opts.feedLines ?? 4
+  const feedLines = opts.feedLines ?? 0
   if (!Number.isInteger(feedLines) || feedLines < 0 || feedLines > 255) {
     throw new Error(`feedLines must be an integer from 0 to 255, got ${feedLines}`)
   }
-  return [Uint8Array.of(0x1b, 0x40), ...rasterBands(img, opts), Uint8Array.of(0x1b, 0x64, feedLines)]
+  const tailRows = opts.tailRows ?? DEFAULT_TAIL_ROWS
+  if (!Number.isInteger(tailRows) || tailRows < 0) {
+    throw new Error(`tailRows must be a non-negative integer, got ${tailRows}`)
+  }
+
+  // Appended rows stay zero (transparent), which prints as paper.
+  let printed = img
+  if (tailRows > 0) {
+    const data = new Uint8ClampedArray((img.height + tailRows) * img.width * 4)
+    data.set(img.data)
+    printed = { width: img.width, height: img.height + tailRows, data }
+  }
+
+  const parts = [Uint8Array.of(0x1b, 0x40), ...rasterBands(printed, opts)]
+  if (feedLines > 0) parts.push(Uint8Array.of(0x1b, 0x64, feedLines))
+  return parts
 }

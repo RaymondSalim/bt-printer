@@ -10,7 +10,7 @@
 
 **Spec:** `docs/superpowers/specs/2026-10-12-bt-printer-web-app-design.md`. Printer facts: `docs/printer-findings.md`. Builds on `docs/superpowers/plans/2026-10-12-foundation-and-spike.md` (modules `encode`, `printer/send`, `printer/status`, `printer/webBluetooth`, `util/exclusive` already exist).
 
-**Scope note:** This plan covers spec milestones 2 and 3 (render, receipt form and preview, shipping label with QR and Code 128, continuous paper). PDF import, CSV batch printing and sticker (gapped) mode are separate later plans. The sticker option appears in the UI as disabled. Remaining hardware tuning from the foundation plan (chunk delay, chunk size, 2400-row jobs, the Status reply) was deferred by the owner, so send defaults stay at 200 bytes, 30 ms, 128-row bands, and the pre-print status check only warns and never blocks.
+**Scope note:** This plan covers spec milestones 2 and 3 (render, receipt form and preview, shipping label with QR and Code 128, continuous paper). PDF import, CSV batch printing and sticker (gapped) mode are separate later plans. The sticker option appears in the UI as disabled. Hardware tuning from the foundation plan is finished: the send defaults are 237-byte chunks, 10 ms apart, with 32-row bands and a 90 ms pause after each band, and `buildPrintJob` appends 96 blank rows so the end of every print clears the tear bar (see `docs/printer-findings.md`). The pre-print status check only warns and never blocks.
 
 ## Global Constraints
 
@@ -1863,7 +1863,7 @@ describe('printImage', () => {
     expect(confirmWarnings).not.toHaveBeenCalled()
     expect(writes.slice(0, 4).map((w) => w[2])).toEqual([1, 2, 3, 4])
     expect(writes[4]).toEqual([0x1b, 0x40])
-    expect(writes[writes.length - 1]).toEqual([0x1b, 0x64, 4])
+    expect(writes.some((w) => w[0] === 0x1b && w[1] === 0x64)).toBe(false)
     const last = progress[progress.length - 1]
     expect(last[0]).toBe(last[1])
   })

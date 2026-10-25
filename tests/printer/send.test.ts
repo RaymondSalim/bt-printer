@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { PrintInterruptedError, sendBytes, type ByteSink } from '../../src/printer/send'
+import { PrintInterruptedError, SEND_DEFAULTS, sendBytes, type ByteSink } from '../../src/printer/send'
 
 function recordingSink(failOnWrite?: number) {
   const writes: Uint8Array[] = []
@@ -18,6 +18,10 @@ const bytes = (n: number, fill = 1) => new Uint8Array(n).fill(fill)
 const noSleep = async () => {}
 
 describe('sendBytes', () => {
+  it('pins the hardware-verified pacing: 237-byte chunks, 10 ms apart, 90 ms after each band', () => {
+    expect(SEND_DEFAULTS).toEqual({ chunkSize: 237, delayMs: 10, partPauseMs: 90 })
+  })
+
   it('splits a part into chunks of at most chunkSize', async () => {
     const { sink, writes } = recordingSink()
     await sendBytes(sink, [bytes(450)], { chunkSize: 200, sleep: noSleep })

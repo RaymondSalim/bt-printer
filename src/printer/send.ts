@@ -2,7 +2,10 @@ export interface ByteSink {
   write(data: Uint8Array): Promise<void>
 }
 
-export const SEND_DEFAULTS = { chunkSize: 237, delayMs: 10, partPauseMs: 0 }
+// Measured on the Putian 802: faster pacing loses data on dense content because
+// the printer drops bytes once its small input buffer is full. This pacing
+// (with 32-row bands) printed 1200 rows of near-solid black intact.
+export const SEND_DEFAULTS = { chunkSize: 237, delayMs: 10, partPauseMs: 90 }
 
 export interface SendOptions {
   chunkSize?: number

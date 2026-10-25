@@ -20,8 +20,8 @@ A static Vite + TypeScript single-page app with no backend and no UI framework (
 
 Four units with narrow interfaces:
 
-- `printer`: wraps Web Bluetooth. Connects to service `ff00`, writes to `ff02` in 200-byte chunks with write-with-response, and exposes `connect()`, `send(bytes, onProgress)`, `disconnect()` and status queries (`DLE EOT`, `GS I`). Defined behind an interface so tests use a fake.
-- `encode`: pure function from a canvas to bytes. Converts to 1-bit by threshold or dither, packs 72 bytes per row, and emits `ESC @`, the raster in bands of about 128 rows per `GS v 0` command, then a feed. Sticker mode adds gap handling, which is a stub until tested with real stickers.
+- `printer`: wraps Web Bluetooth. Connects to service `ff00`, writes to `ff02` in 237-byte chunks, 10 ms apart, with write-with-response, and pauses 90 ms after each raster band, and exposes `connect()`, `send(bytes, onProgress)`, `disconnect()` and status queries (`DLE EOT`, `GS I`). Defined behind an interface so tests use a fake.
+- `encode`: pure function from a canvas to bytes. Converts to 1-bit by threshold or dither, packs 72 bytes per row, and emits `ESC @`, the raster in bands of 32 rows per `GS v 0` command, then enough blank rows (96) that the end of the content clears the printer's tear bar. The printer has a small input buffer and drops bytes when it is outrun, so these band and pause values are required for dense content (see `docs/printer-findings.md`). Sticker mode adds gap handling, which is a stub until tested with real stickers.
 - `render`: draws a document model (text, rules, tables, QR, barcodes, page images) onto the 576-pixel canvas. Two templates: receipt and shipping label. Knows nothing about Bluetooth.
 - `import`: renders a PDF page with pdf.js, then scales, crops and rotates it to 576 pixels. Parses a CSV into rows mapped onto template fields so one file can produce a batch.
 

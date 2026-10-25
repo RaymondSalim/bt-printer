@@ -104,8 +104,30 @@ Findings:
 - At 30 ms the data arrives slower than the head consumes it, so the head stalls and the diagonal prints wobbly. Faster transfer gives better print quality as well as speed.
 - Going from 10 ms to 0 ms barely changes the rate, because each write waits for its acknowledgement. Raising the chunk size from 200 to 237 bytes adds about 25 percent.
 - F (write without response) is unresolved. The slip was truncated, which could mean dropped data or only that the final feed had not pushed the last 12 to 20 mm out from under the head before the paper was torn. A rerun with an extra feed sent afterwards (`--only F --tail-feed 10`) settles it. Until then, writes stay with response.
-- The defaults were changed to 237-byte chunks and 10 ms delay (run D). Jobs larger than 1200 rows have not been verified at these settings, and the earlier 2400-row attempt died with the printer's battery.
+- Run D alone proved not to be safe for dense content; see the pacing section below, which supersedes this table for choosing defaults.
 
 The printer stopped advertising BLE after sitting idle and had to be switched on again before further tests; the app should treat "not found" as a prompt to wake the printer.
 
-Still open: F rerun, a 2400-row job at the new defaults, and whether Chrome asks to re-pair after a page reload.
+
+## Input buffer, pacing and tear distance (2026-10-25)
+
+The printer has a small input buffer and drops bytes when it is outrun; write-with-response only acknowledges the BLE link, not the print engine. Dense content prints slower than sparse content, so the safe send rate depends on what is printed.
+
+| Run | Content | Settings | Result |
+|---|---|---|---|
+| F, twice | sparse, 400 rows | 237 B, 10 ms, no response, 19.8 KiB/s | output ends near row 250 both times (about 18 KB sent); the second run also began with leftover fragments from the first |
+| D dense | 40-row black bands alternating with white, 800 rows | 237 B, 10 ms, response, 128-row bands, no pause, 7.2 KiB/s | first 720 rows correct, then the label is shifted and wrapped across the paper and junk follows; reproduced without any resync or extra feed, so it is data loss |
+| D dense, ping | same, 800 rows | 32-row bands, `GS I 1` wait after each band, 5.4 KiB/s effective | complete and clean |
+| D solid | near-solid black, 400 rows | 32-row bands, 90 ms pause after each band, 5.4 KiB/s | complete and clean |
+| D solid long | near-solid black, 1200 rows plus 96 blank rows | same pacing, 5.6 KiB/s | complete and clean to the end marker |
+
+Conclusions:
+
+- Defaults are now 237-byte chunks, 10 ms between chunks, 32-row bands and a 90 ms pause after each band (about 5.5 KiB/s). Write without response is rejected. Faster pacing was not explored beyond this; a density-aware pause could recover speed on light content.
+- Corruption from a lost byte is a sideways shift of everything after it (text wraps across the paper edge), followed by junk, because the raster parser loses its place mid-band.
+- `GS I 1` is answered about 0.09 s after it is sent regardless of how much data is still queued, so it cannot be used as a "buffer drained" flow-control marker.
+- A resync that sends a band's worth of zero bytes followed by `ESC @` clears a printer stuck mid-band (`resync()` in `tools/ble-probe/blesweep.py`); NUL bytes outside a command are ignored.
+- `ESC d 4` feeds almost nothing on this unit. The tear bar sits about 70 rows (about 9 mm) beyond the head: without trailing blank rows the last 60 rows of a print were torn off, and 80 blank rows left about 10 rows of margin. The encoder now appends 96 blank rows to every job.
+- Status replies `16 12 12 12` were confirmed again, and the printer powers itself off after sitting idle.
+
+Still open: whether Chrome asks to re-pair after a page reload (needs the browser), and a 2400-row job at the new pacing in the browser.
