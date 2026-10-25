@@ -2,7 +2,7 @@ export interface ByteSink {
   write(data: Uint8Array): Promise<void>
 }
 
-export const SEND_DEFAULTS = { chunkSize: 200, delayMs: 30, partPauseMs: 0 }
+export const SEND_DEFAULTS = { chunkSize: 237, delayMs: 10, partPauseMs: 0 }
 
 export interface SendOptions {
   chunkSize?: number

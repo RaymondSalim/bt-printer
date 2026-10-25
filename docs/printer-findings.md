@@ -85,3 +85,27 @@ Measured from Chrome on macOS over Web Bluetooth using the spike page, defaults 
 What this establishes: the browser path works end to end, and jobs up to 1200 rows (86 KB) print with no dropped or reordered data at 30 ms between 200-byte chunks. The link rate of about 3.1 KiB/s is roughly 63 ms per chunk (30 ms delay plus about 33 ms acknowledgement). The print engine (60 to 70 mm/s listed) can consume far more than that, so no buffer overrun was seen and the link is the bottleneck.
 
 Not established: whether 2400 rows (or any larger single job) prints, since the failure coincided with the battery dying; the smallest safe chunk delay; whether 237-byte chunks work; the cause of the slow 600-row run; whether Chrome asks to re-pair after a reload; and the status reply (the Status button was not recorded). A repeat on a charged battery, trying delay 10 and 0 and 237-byte chunks at 1200 rows, then 2400 rows twice, would settle these. If 2400 rows fails at about 16 KB again on a full charge, the failure is not battery related.
+
+## Link sweep over BLE (2026-10-25)
+
+Measured with `tools/ble-probe/blesweep.py` (Python/bleak on macOS, same job format as the app: `ESC @`, 128-row `GS v 0` bands, `ESC d 4`). Each run printed a 400-row labelled pattern (about 28.8 KB). Status replies were `16 12 12 12`, which confirms the all-clear decoding in `src/printer/status.ts`.
+
+| Run | Chunk | Delay | Write mode | Time | Rate | Slip (owner photo) |
+|---|---|---|---|---|---|---|
+| A | 200 B | 30 ms | response | 9.0 s | 3.1 KiB/s | wobbly diagonal, wavering left border, stray text near the title |
+| B | 200 B | 10 ms | response | 4.8 s | 5.9 KiB/s | clean |
+| C | 200 B | 0 ms | response | 4.6 s | 6.1 KiB/s | clean |
+| D | 237 B | 10 ms | response | 3.8 s | 7.5 KiB/s | clean |
+| E | 237 B | 0 ms | response | 3.8 s | 7.5 KiB/s | clean |
+| F | 237 B | 10 ms | no response | 1.4 s | 19.8 KiB/s | cut off near row 250, no right edge or bottom border |
+
+Findings:
+
+- At 30 ms the data arrives slower than the head consumes it, so the head stalls and the diagonal prints wobbly. Faster transfer gives better print quality as well as speed.
+- Going from 10 ms to 0 ms barely changes the rate, because each write waits for its acknowledgement. Raising the chunk size from 200 to 237 bytes adds about 25 percent.
+- F (write without response) is unresolved. The slip was truncated, which could mean dropped data or only that the final feed had not pushed the last 12 to 20 mm out from under the head before the paper was torn. A rerun with an extra feed sent afterwards (`--only F --tail-feed 10`) settles it. Until then, writes stay with response.
+- The defaults were changed to 237-byte chunks and 10 ms delay (run D). Jobs larger than 1200 rows have not been verified at these settings, and the earlier 2400-row attempt died with the printer's battery.
+
+The printer stopped advertising BLE after sitting idle and had to be switched on again before further tests; the app should treat "not found" as a prompt to wake the printer.
+
+Still open: F rerun, a 2400-row job at the new defaults, and whether Chrome asks to re-pair after a page reload.
