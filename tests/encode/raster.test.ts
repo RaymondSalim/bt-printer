@@ -5,6 +5,7 @@ import {
   PRINT_WIDTH_DOTS,
   ROW_BYTES,
   buildPrintJob,
+  monoPreview,
   rasterBands,
   type RgbaImage,
 } from '../../src/encode/raster'
@@ -146,5 +147,46 @@ describe('buildPrintJob', () => {
     const img = makeImage(1, () => BLACK)
     expect(() => buildPrintJob(img, { feedLines: 256 })).toThrow(/feed/i)
     expect(() => buildPrintJob(img, { feedLines: -1 })).toThrow(/feed/i)
+  })
+})
+
+describe('monoPreview', () => {
+  it('maps black pixels to opaque black and everything else to opaque white', () => {
+    const img = makeImage(1, (x) =>
+      x === 0 ? BLACK : x === 1 ? [200, 200, 200, 255] : [0, 0, 0, 0],
+    )
+    const out = monoPreview(img)
+    expect(out.length).toBe(img.data.length)
+    expect([...out.slice(0, 4)]).toEqual([0, 0, 0, 255])
+    expect([...out.slice(4, 8)]).toEqual([255, 255, 255, 255])
+    expect([...out.slice(8, 12)]).toEqual([255, 255, 255, 255])
+  })
+
+  it('uses the same threshold rule as the encoder', () => {
+    const gray = (v: number) => makeImage(1, () => [v, v, v, 255])
+    expect(monoPreview(gray(127))[0]).toBe(0)
+    expect(monoPreview(gray(128))[0]).toBe(255)
+    expect(monoPreview(gray(200), 220)[0]).toBe(0)
+  })
+
+  it('agrees with the encoder on every pixel of a mixed image', () => {
+    let seed = 12345
+    const next = () => {
+      seed = (seed * 1103515245 + 12345) & 0x7fffffff
+      return seed
+    }
+    const img = makeImage(3, () => [next() % 256, next() % 256, next() % 256, 255 - (next() % 3) * 100])
+    const preview = monoPreview(img)
+    const [band] = rasterBands(img, { bandRows: 3 })
+    for (let y = 0; y < 3; y++) {
+      for (let xb = 0; xb < ROW_BYTES; xb++) {
+        let expected = 0
+        for (let bit = 0; bit < 8; bit++) {
+          const i = (y * PRINT_WIDTH_DOTS + xb * 8 + bit) * 4
+          if (preview[i] === 0) expected |= 0x80 >> bit
+        }
+        expect(band[8 + y * ROW_BYTES + xb]).toBe(expected)
+      }
+    }
   })
 })

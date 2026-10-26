@@ -65,6 +65,23 @@ export function rasterBands(img: RgbaImage, opts: RasterOptions = {}): Uint8Arra
   return bands
 }
 
+// Opaque black and white RGBA pixels using the same decision as the encoder,
+// so what the preview shows is what gets printed.
+export function monoPreview(
+  img: RgbaImage,
+  threshold: number = DEFAULT_THRESHOLD,
+): Uint8ClampedArray<ArrayBuffer> {
+  const out = new Uint8ClampedArray(img.data.length)
+  for (let i = 0; i < img.data.length; i += 4) {
+    const value = isBlack(img.data, i, threshold) ? 0 : 255
+    out[i] = value
+    out[i + 1] = value
+    out[i + 2] = value
+    out[i + 3] = 255
+  }
+  return out
+}
+
 export function buildPrintJob(img: RgbaImage, opts: JobOptions = {}): Uint8Array[] {
   const feedLines = opts.feedLines ?? 0
   if (!Number.isInteger(feedLines) || feedLines < 0 || feedLines > 255) {
