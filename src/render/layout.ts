@@ -15,6 +15,7 @@ const MIN_QR_MODULE = 2
 const DEFAULT_BARCODE_HEIGHT = 80
 const DEFAULT_BARCODE_MODULE = 2
 const BARCODE_QUIET_MODULES = 10
+const BARCODE_GAP = 6
 
 export type LayoutItem =
   | { kind: 'text'; text: string; x: number; y: number; size: number; bold: boolean; align: Align }
@@ -140,7 +141,7 @@ export function layoutDocument(doc: DocumentModel, measure: Measure): Layout {
           height,
           modules,
         })
-        y += height
+        y += height + BARCODE_GAP
         break
       }
       default:

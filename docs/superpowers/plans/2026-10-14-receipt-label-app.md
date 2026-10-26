@@ -416,7 +416,7 @@ git commit -m "feat: add text wrapping and layout engine"
   - `Block` additions: `{ type: 'qr'; data: string; size?: number; align?: Align }` and `{ type: 'barcode'; data: string; height?: number; moduleWidth?: number; align?: Align }`
   - `LayoutItem` additions: `{ kind: 'modules'; x: number; y: number; moduleSize: number; matrix: boolean[][] }` and `{ kind: 'bars'; x: number; y: number; moduleWidth: number; height: number; modules: string }`
 
-QR defaults: target size 192 dots including a 4-module quiet zone, minimum 2 dots per module, centered. Barcode defaults: height 80, module width 2 reduced to fit, 10-module quiet zones, centered. The pattern table below comes from the MIT-licensed JsBarcode project (`src/barcodes/CODE128/constants.js`).
+QR defaults: target size 192 dots including a 4-module quiet zone, minimum 2 dots per module, centered. Barcode defaults: height 80 plus a 6-dot gap below, module width 2 reduced to fit, 10-module quiet zones, centered. The pattern table below comes from the MIT-licensed JsBarcode project (`src/barcodes/CODE128/constants.js`).
 
 - [ ] **Step 1: Install the QR dependency**
 
@@ -536,7 +536,7 @@ describe('layoutDocument codes', () => {
       x: 132,
       y: 8,
     })
-    expect(result.height).toBe(96)
+    expect(result.height).toBe(102)
   })
 
   it('shrinks the module width to fit a longer barcode', () => {
@@ -665,6 +665,7 @@ const MIN_QR_MODULE = 2
 const DEFAULT_BARCODE_HEIGHT = 80
 const DEFAULT_BARCODE_MODULE = 2
 const BARCODE_QUIET_MODULES = 10
+const BARCODE_GAP = 6
 ```
 Add to the `LayoutItem` union:
 ```ts
@@ -724,7 +725,7 @@ Add these cases before `default:` in the `switch`:
           height,
           modules,
         })
-        y += height
+        y += height + BARCODE_GAP
         break
       }
 ```

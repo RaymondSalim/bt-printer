@@ -134,7 +134,7 @@ describe('layoutDocument codes', () => {
       x: 132,
       y: 8,
     })
-    expect(result.height).toBe(96)
+    expect(result.height).toBe(102)
   })
 
   it('shrinks the module width to fit a longer barcode', () => {

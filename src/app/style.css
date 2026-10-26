@@ -14,3 +14,4 @@ nav button.active { font-weight: 700; text-decoration: underline; }
 #error { color: #b91c1c; min-height: 1.4em; margin: 8px 0 0; }
 #log { background: #f4f4f5; padding: 8px; min-height: 6em; max-height: 12em; overflow: auto; margin: 8px 0 0; }
 progress { width: 100%; margin-top: 8px; }
+.field input[type='checkbox'] { justify-self: start; }
