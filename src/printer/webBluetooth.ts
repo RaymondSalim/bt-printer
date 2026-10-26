@@ -11,6 +11,7 @@ export class WebBluetoothPrinter implements ByteSink, StatusIo {
   private writeChar?: BluetoothRemoteGATTCharacteristic
   private notifyChar?: BluetoothRemoteGATTCharacteristic
   private readonly listeners = new Set<(data: Uint8Array) => void>()
+  private readonly disconnectListeners = new Set<() => void>()
 
   get connected(): boolean {
     return this.device?.gatt?.connected === true
@@ -20,25 +21,29 @@ export class WebBluetoothPrinter implements ByteSink, StatusIo {
     if (!('bluetooth' in navigator)) {
       throw new Error('Web Bluetooth is not available. Use Chrome or Edge over HTTPS or localhost.')
     }
+    this.teardown()
     const device = await navigator.bluetooth.requestDevice({
       filters: [{ name: PRINTER_NAME }],
       optionalServices: [SERVICE_UUID],
     })
     if (!device.gatt) throw new Error('The selected device has no GATT server')
-    const server = await device.gatt.connect()
-    const service = await server.getPrimaryService(SERVICE_UUID)
-    this.writeChar = await service.getCharacteristic(WRITE_CHAR_UUID)
-    this.notifyChar = await service.getCharacteristic(NOTIFY_CHAR_UUID)
-    this.notifyChar.addEventListener('characteristicvaluechanged', this.handleNotify)
-    await this.notifyChar.startNotifications()
+    device.addEventListener('gattserverdisconnected', this.handleDisconnected)
     this.device = device
+    try {
+      const server = await device.gatt.connect()
+      const service = await server.getPrimaryService(SERVICE_UUID)
+      this.writeChar = await service.getCharacteristic(WRITE_CHAR_UUID)
+      this.notifyChar = await service.getCharacteristic(NOTIFY_CHAR_UUID)
+      this.notifyChar.addEventListener('characteristicvaluechanged', this.handleNotify)
+      await this.notifyChar.startNotifications()
+    } catch (err) {
+      this.teardown()
+      throw err
+    }
   }
 
   disconnect(): void {
-    this.notifyChar?.removeEventListener('characteristicvaluechanged', this.handleNotify)
-    this.device?.gatt?.disconnect()
-    this.writeChar = undefined
-    this.notifyChar = undefined
+    this.teardown()
   }
 
   async write(data: Uint8Array): Promise<void> {
@@ -49,6 +54,26 @@ export class WebBluetoothPrinter implements ByteSink, StatusIo {
   onNotify(cb: (data: Uint8Array) => void): () => void {
     this.listeners.add(cb)
     return () => this.listeners.delete(cb)
+  }
+
+  onDisconnected(cb: () => void): () => void {
+    this.disconnectListeners.add(cb)
+    return () => this.disconnectListeners.delete(cb)
+  }
+
+  private teardown(): void {
+    this.notifyChar?.removeEventListener('characteristicvaluechanged', this.handleNotify)
+    this.device?.removeEventListener('gattserverdisconnected', this.handleDisconnected)
+    this.device?.gatt?.disconnect()
+    this.writeChar = undefined
+    this.notifyChar = undefined
+    this.device = undefined
+  }
+
+  private readonly handleDisconnected = (): void => {
+    this.writeChar = undefined
+    this.notifyChar = undefined
+    this.disconnectListeners.forEach((cb) => cb())
   }
 
   private readonly handleNotify = (event: Event): void => {
