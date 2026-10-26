@@ -131,3 +131,17 @@ Conclusions:
 - Status replies `16 12 12 12` were confirmed again, and the printer powers itself off after sitting idle.
 
 Still open: whether Chrome asks to re-pair after a page reload (needs the browser), and a 2400-row job at the new pacing in the browser.
+
+## Shopee shipping label PDFs (2026-10-26)
+
+Three sample files from the Shopee seller centre (one JNE Reguler, two SPX Standard), created by Chromium and post-processed with pdfcpu. Each is a single landscape A4 page (842 x 595 pt). The label sits in the left half with a dashed cut line down the middle; the right half was empty with one order per file. The label plus its product table is about 139 to 145 mm wide and about 130 mm tall. Barcodes and the QR code are embedded raster images, not vector. The JNE label has a Code 128 barcode of the tracking number and a smaller Code 128 of the order number. The SPX labels add a QR code of the tracking number and tiny rotated tracking text along the edges.
+
+Fitting the label to 552 dots (69 mm, inside the 12-dot margins) means scaling to about 48 to 50 percent of native size, which makes the main barcode bars roughly 2.3 dots wide.
+
+Scan test with the zxing-wasm decoder in strict mode (no try-harder, rotate, invert or downscale), rendering the label directly at the target size with `pdftoppm`, then thresholding to 1 bit:
+
+- The main Code 128 tracking barcode and the QR code decode on all three labels at 540, 552 and 564 px wide and at small sub-pixel shifts. They keep decoding when the 1-bit threshold is moved anywhere from 80 to 200, which emulates a fraction of a dot of ink spread.
+- A full one-dot growth or shrink of every edge breaks the Code 128 barcodes on all three labels. The QR code survives it. The JNE label has no QR, so its only tracking barcode is the fragile one.
+- The small order-number barcode decodes at 300 dpi but not at the target size.
+
+This is software decoding of a clean raster. Whether a courier's handheld scanner reads the printed slip is untested. If it does not, the fallback is to read the tracking number from the PDF text layer and redraw the barcode with the app's own Code 128 encoder at an integer module width.
