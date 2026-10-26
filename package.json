@@ -18,9 +18,13 @@
   "private": true,
   "type": "module",
   "devDependencies": {
+    "@types/qrcode": "^1.5.6",
     "@types/web-bluetooth": "^0.0.21",
     "typescript": "^7.0.2",
     "vite": "^8.3.4",
     "vitest": "^5.0.4"
+  },
+  "dependencies": {
+    "qrcode": "^1.5.4"
   }
 }

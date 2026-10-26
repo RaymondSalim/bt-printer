@@ -99,3 +99,61 @@ describe('layoutDocument', () => {
     expect(result.height).toBe(10 + 30 + 10)
   })
 })
+
+describe('layoutDocument codes', () => {
+  it('centers a QR code with a quiet zone and an integer module size', () => {
+    const result = layout({ blocks: [{ type: 'qr', data: 'hello' }] })
+    const item = result.items[0]
+    expect(item).toMatchObject({ kind: 'modules', moduleSize: 6, x: 225, y: 32 })
+    expect(item.kind === 'modules' && item.matrix.length).toBe(21)
+    expect(result.height).toBe(8 + 174 + 8)
+  })
+
+  it('aligns a QR code left or right', () => {
+    const left = layout({ blocks: [{ type: 'qr', data: 'hello', align: 'left' }] }).items[0]
+    const right = layout({ blocks: [{ type: 'qr', data: 'hello', align: 'right' }] }).items[0]
+    expect(left).toMatchObject({ x: 36 })
+    expect(right).toMatchObject({ x: 414 })
+  })
+
+  it('honors a smaller QR size and clamps one wider than the content', () => {
+    expect(layout({ blocks: [{ type: 'qr', data: 'hello', size: 100 }] }).height).toBe(8 + 87 + 8)
+    expect(layout({ blocks: [{ type: 'qr', data: 'hello', size: 1000 }] }).height).toBe(8 + 551 + 8)
+  })
+
+  it('rejects QR data that cannot be drawn at two dots per module', () => {
+    expect(() => layout({ blocks: [{ type: 'qr', data: 'x'.repeat(2000) }] })).toThrow(/QR/)
+  })
+
+  it('centers a Code 128 barcode with quiet zones at module width 2', () => {
+    const result = layout({ blocks: [{ type: 'barcode', data: 'TRACK123456' }] })
+    expect(result.items[0]).toMatchObject({
+      kind: 'bars',
+      moduleWidth: 2,
+      height: 80,
+      x: 132,
+      y: 8,
+    })
+    expect(result.height).toBe(96)
+  })
+
+  it('shrinks the module width to fit a longer barcode', () => {
+    const result = layout({ blocks: [{ type: 'barcode', data: 'A'.repeat(30) }] })
+    expect(result.items[0]).toMatchObject({ kind: 'bars', moduleWidth: 1, x: 105 })
+  })
+
+  it('honors an explicit module width and height when they fit', () => {
+    const result = layout({
+      blocks: [{ type: 'barcode', data: 'TRACK123456', moduleWidth: 3, height: 50 }],
+    })
+    expect(result.items[0]).toMatchObject({ moduleWidth: 3, height: 50 })
+  })
+
+  it('rejects a barcode that cannot fit even at one dot per module', () => {
+    expect(() => layout({ blocks: [{ type: 'barcode', data: 'A'.repeat(60) }] })).toThrow(/Barcode/)
+  })
+
+  it('rejects barcode text outside Code 128 set B', () => {
+    expect(() => layout({ blocks: [{ type: 'barcode', data: 'café' }] })).toThrow(/position 3/)
+  })
+})
