@@ -137,9 +137,18 @@ describe('layoutDocument codes', () => {
     expect(result.height).toBe(102)
   })
 
-  it('shrinks the module width to fit a longer barcode', () => {
-    const result = layout({ blocks: [{ type: 'barcode', data: 'A'.repeat(30) }] })
-    expect(result.items[0]).toMatchObject({ kind: 'bars', moduleWidth: 1, x: 105 })
+  it('fits a 20-character barcode at two dots per module', () => {
+    const result = layout({ blocks: [{ type: 'barcode', data: 'A'.repeat(20) }] })
+    expect(result.items[0]).toMatchObject({ kind: 'bars', moduleWidth: 2, x: 33 })
+  })
+
+  it('shrinks a wider requested module width down to two dots to fit', () => {
+    const result = layout({ blocks: [{ type: 'barcode', data: 'A'.repeat(20), moduleWidth: 3 }] })
+    expect(result.items[0]).toMatchObject({ moduleWidth: 2 })
+  })
+
+  it('rejects a barcode that would need bars thinner than two dots', () => {
+    expect(() => layout({ blocks: [{ type: 'barcode', data: 'A'.repeat(21) }] })).toThrow(/Barcode/)
   })
 
   it('honors an explicit module width and height when they fit', () => {
@@ -155,5 +164,24 @@ describe('layoutDocument codes', () => {
 
   it('rejects barcode text outside Code 128 set B', () => {
     expect(() => layout({ blocks: [{ type: 'barcode', data: 'café' }] })).toThrow(/position 3/)
+  })
+})
+
+describe('layoutDocument column overflow', () => {
+  it('wraps a right column wider than two thirds of the line and keeps all text on the page', () => {
+    const result = layout({ blocks: [{ type: 'columns', left: 'No', right: 'X'.repeat(54) }] })
+    const texts = result.items.flatMap((i) => (i.kind === 'text' ? [i] : []))
+    const rightLines = texts.filter((i) => i.align === 'right')
+    expect(rightLines.map((i) => [i.text.length, i.y])).toEqual([
+      [30, 8],
+      [24, 38],
+    ])
+    for (const t of texts) {
+      const w = measure(t.text, t.size)
+      const left = t.align === 'right' ? t.x - w : t.x
+      expect(left).toBeGreaterThanOrEqual(12)
+      expect(left + w).toBeLessThanOrEqual(564)
+    }
+    expect(result.height).toBe(8 + 2 * 30 + 8)
   })
 })

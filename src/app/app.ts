@@ -21,6 +21,8 @@ export function createApp(root: HTMLElement): void {
   let current: HTMLCanvasElement | null = null
   let abort: AbortController | null = null
   let busy = false
+  // A write that failed mid-band can leave the printer waiting for the rest of that band.
+  let needsResync = false
 
   root.innerHTML = `
     <header>
@@ -161,10 +163,13 @@ export function createApp(root: HTMLElement): void {
           progress.value = sent
         },
         signal: abort.signal,
+        resyncFirst: needsResync,
       })
+      if (outcome === 'printed') needsResync = false
       log(outcome === 'printed' ? 'Printed' : 'Cancelled before printing')
     } catch (err) {
       if (err instanceof PrintInterruptedError) {
+        if (err.reason === 'write-failed') needsResync = true
         log(`Print ${err.reason} after ${err.bytesSent} of ${err.totalBytes} bytes; cause: ${String(err.cause)}`)
       } else {
         log(`Print failed: ${message(err)}`)

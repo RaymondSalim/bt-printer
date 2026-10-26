@@ -15,6 +15,7 @@ const MIN_QR_MODULE = 2
 const DEFAULT_BARCODE_HEIGHT = 80
 const DEFAULT_BARCODE_MODULE = 2
 const BARCODE_QUIET_MODULES = 10
+const MIN_BARCODE_MODULE = 2
 const BARCODE_GAP = 6
 
 export type LayoutItem =
@@ -68,21 +69,28 @@ export function layoutDocument(doc: DocumentModel, measure: Measure): Layout {
         const size = block.size ?? DEFAULT_FONT_SIZE
         const bold = block.bold ?? false
         const lineHeight = Math.ceil(size * LINE_HEIGHT_RATIO)
-        const rightWidth = block.right === '' ? 0 : Math.ceil(measure(block.right, size, bold))
+        const lineWidth = (t: string) => measure(t, size, bold)
+        // The right column is capped at two thirds of the line and wraps beyond that,
+        // so long values stay on the page instead of overprinting the left label.
+        const rightLines =
+          block.right === '' ? [] : wrapText(block.right, Math.floor((contentWidth * 2) / 3), lineWidth)
+        const rightWidth = Math.max(0, ...rightLines.map((line) => Math.ceil(lineWidth(line))))
         const leftMax = Math.max(
           contentWidth - rightWidth - (rightWidth > 0 ? COLUMN_GAP : 0),
           Math.floor(contentWidth / 3),
         )
-        const leftLines = wrapText(block.left, leftMax, (t) => measure(t, size, bold))
+        const leftLines = wrapText(block.left, leftMax, lineWidth)
         leftLines.forEach((line, i) => {
           if (line !== '') {
             items.push({ kind: 'text', text: line, x: marginX, y: y + i * lineHeight, size, bold, align: 'left' })
           }
         })
-        if (block.right !== '') {
-          items.push({ kind: 'text', text: block.right, x: width - marginX, y, size, bold, align: 'right' })
-        }
-        y += lineHeight * leftLines.length
+        rightLines.forEach((line, i) => {
+          if (line !== '') {
+            items.push({ kind: 'text', text: line, x: width - marginX, y: y + i * lineHeight, size, bold, align: 'right' })
+          }
+        })
+        y += lineHeight * Math.max(leftLines.length, rightLines.length)
         break
       }
       case 'rule': {
@@ -127,9 +135,10 @@ export function layoutDocument(doc: DocumentModel, measure: Measure): Layout {
         const cells = modules.length + 2 * BARCODE_QUIET_MODULES
         let moduleWidth = block.moduleWidth ?? DEFAULT_BARCODE_MODULE
         if (cells * moduleWidth > contentWidth) moduleWidth = Math.floor(contentWidth / cells)
-        if (moduleWidth < 1) {
+        // Bars thinner than two dots (0.25 mm) are unreliable to scan from a thermal head.
+        if (moduleWidth < MIN_BARCODE_MODULE) {
           throw new Error(
-            `Barcode for ${block.data.length} characters needs ${cells} dots but only ${contentWidth} are available`,
+            `Barcode for ${block.data.length} characters needs ${cells * MIN_BARCODE_MODULE} dots at two dots per bar but only ${contentWidth} are available; shorten the tracking number`,
           )
         }
         const x = alignedX(block.align ?? 'center', cells * moduleWidth)

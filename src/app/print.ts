@@ -1,4 +1,4 @@
-import { buildPrintJob, type RgbaImage } from '../encode/raster'
+import { DEFAULT_BAND_ROWS, ROW_BYTES, buildPrintJob, type RgbaImage } from '../encode/raster'
 import { sendBytes, type ByteSink } from '../printer/send'
 import { PrinterNotRespondingError, readStatus, type StatusIo } from '../printer/status'
 
@@ -10,7 +10,17 @@ export interface PrintOptions {
   onProgress?(sent: number, total: number): void
   signal?: AbortSignal
   feedLines?: number
+  resyncFirst?: boolean
   sleep?(ms: number): Promise<void>
+}
+
+// A band's worth of zero bytes completes any raster command the printer is still
+// waiting on after an interrupted job (NUL outside a command is ignored), and
+// ESC @ then resets it.
+const RESYNC_PAD_BYTES = 8 + DEFAULT_BAND_ROWS * ROW_BYTES + 64
+
+export async function resyncPrinter(sink: ByteSink, sleep?: (ms: number) => Promise<void>): Promise<void> {
+  await sendBytes(sink, [new Uint8Array(RESYNC_PAD_BYTES), Uint8Array.of(0x1b, 0x40)], { sleep })
 }
 
 // Status bit decoding has only been observed for the all-clear case on this
@@ -39,6 +49,7 @@ export async function printImage(
   opts: PrintOptions,
 ): Promise<PrintOutcome> {
   const job = buildPrintJob(img, { feedLines: opts.feedLines })
+  if (opts.resyncFirst) await resyncPrinter(link, opts.sleep)
   const warnings = await preflight(link)
   if (warnings.length > 0 && !(await opts.confirmWarnings(warnings))) return 'cancelled'
   await sendBytes(link, job, {

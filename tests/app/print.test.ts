@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { preflight, printImage, type PrintLink } from '../../src/app/print'
+import { preflight, printImage, resyncPrinter, type PrintLink } from '../../src/app/print'
 import type { RgbaImage } from '../../src/encode/raster'
 
 afterEach(() => vi.useRealTimers())
@@ -122,5 +122,38 @@ describe('printImage', () => {
     const { link, writes } = fakeLink(OK)
     await printImage(link, blank(), { confirmWarnings: async () => true, sleep: noSleep, feedLines: 9 })
     expect(writes[writes.length - 1]).toEqual([0x1b, 0x64, 9])
+  })
+})
+
+describe('resyncPrinter', () => {
+  it('finishes any half-received band with zero bytes and then resets the printer', async () => {
+    const { link, writes } = fakeLink(null)
+    await resyncPrinter(link, noSleep)
+    const zeros = writes.slice(0, -1)
+    expect(zeros.every((w) => w.length <= 237 && w.every((b) => b === 0))).toBe(true)
+    expect(zeros.reduce((n, w) => n + w.length, 0)).toBeGreaterThanOrEqual(8 + 32 * 72)
+    expect(writes[writes.length - 1]).toEqual([0x1b, 0x40])
+  })
+})
+
+describe('printImage resync', () => {
+  it('sends the resync before the status check when asked', async () => {
+    const { link, writes } = fakeLink(OK)
+    await printImage(link, blank(), {
+      confirmWarnings: async () => true,
+      sleep: noSleep,
+      resyncFirst: true,
+    })
+    expect(writes[0].every((b) => b === 0)).toBe(true)
+    const firstStatus = writes.findIndex((w) => w[0] === 0x10 && w[1] === 0x04)
+    const lastResync = writes.findIndex((w) => w[0] === 0x1b && w[1] === 0x40)
+    expect(lastResync).toBeGreaterThan(0)
+    expect(lastResync).toBeLessThan(firstStatus)
+  })
+
+  it('does not resync by default', async () => {
+    const { link, writes } = fakeLink(OK)
+    await printImage(link, blank(), { confirmWarnings: async () => true, sleep: noSleep })
+    expect(writes[0]).toEqual([0x10, 0x04, 1])
   })
 })

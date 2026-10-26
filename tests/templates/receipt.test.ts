@@ -81,8 +81,30 @@ describe('receiptTotals', () => {
     ['negative discount', { discount: -1 }, /discount/i],
     ['discount above subtotal', { discount: 35001 }, /discount/i],
     ['negative paid', { paid: -1 }, /paid/i],
+    [
+      'fractional rupiah price',
+      { items: [{ name: 'a', qty: 1, unitPrice: 1500.5 }] },
+      /Item 1.*whole number/,
+    ],
+    ['fractional rupiah discount', { discount: 0.4 }, /discount.*whole number/i],
+    ['fractional rupiah paid', { paid: 50000.5 }, /paid.*whole number/i],
   ])('rejects %s', (_label, patch, message) => {
     expect(() => receiptTotals({ ...base, ...patch })).toThrow(message)
+  })
+})
+
+describe('receiptTotals currency precision', () => {
+  const usd: ReceiptData = { ...base, currency: 'USD', taxPercent: 0, paid: undefined }
+
+  it('accepts two decimals in a two-decimal currency', () => {
+    const t = receiptTotals({ ...usd, items: [{ name: 'x', qty: 1, unitPrice: 19.99 }] })
+    expect(t.total).toBe(19.99)
+  })
+
+  it('rejects more decimals than the currency has', () => {
+    expect(() =>
+      receiptTotals({ ...usd, items: [{ name: 'x', qty: 1, unitPrice: 0.001 }] }),
+    ).toThrow(/Item 1.*at most 2 decimals/)
   })
 })
 

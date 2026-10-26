@@ -2715,3 +2715,14 @@ Expected: all green.
 **Placeholders.** None; every code step has complete code and every run step has a command and expected result.
 
 **Type consistency.** `Block`, `LayoutItem`, `Layout`, `DocumentModel`, `RgbaImage`, `FormView`, `RawReceiptForm`, `RawLabelForm`, `ReceiptData`, `LabelData`, `PrintLink`, `PrintOptions` and `printImage` use the same names and fields wherever they appear. `Block` gains `qr` and `barcode` in Task 2 and the layout `switch` stays exhaustive through `assertNever`. `monoPreview` returns `Uint8ClampedArray<ArrayBuffer>` so `new ImageData(...)` accepts it.
+
+---
+
+## Review fixes applied after the final review
+
+The final whole-branch review led to four changes, each driven by a failing test first. The task text above shows the original code; where it differs, the repository is authoritative.
+
+- Two-column rows cap the right column at two thirds of the line and wrap it, so a long receipt number or order id stays on the page (`layoutDocument`, `columns`).
+- Code 128 bars must be at least two dots wide. Tracking numbers longer than 20 characters now fail with a clear error instead of printing one-dot bars; Code 128 set C for digit runs would lift that limit later.
+- Receipt amounts must be exact in the currency: unit price, discount and paid amount are rejected when rounding would change them (whole rupiah, at most two decimals otherwise).
+- `printImage` accepts `resyncFirst`, and the UI sets it after a write fails mid-job, so the next print starts with `resyncPrinter` (a band of zero bytes, then `ESC @`).

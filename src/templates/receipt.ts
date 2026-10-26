@@ -1,6 +1,6 @@
 import type { Block, DocumentModel } from '../render/types'
 import { cleanLines } from './lines'
-import { formatMoney, roundMoney } from './money'
+import { currencyDigits, formatMoney, roundMoney } from './money'
 
 export interface ReceiptItem {
   name: string
@@ -31,7 +31,15 @@ export interface ReceiptTotals {
   change?: number
 }
 
+function precision(currency: string): string {
+  const digits = currencyDigits(currency)
+  return digits === 0 ? 'a whole number' : `at most ${digits} decimals`
+}
+
 function validate(data: ReceiptData): void {
+  const currency = data.currency ?? 'IDR'
+  // An amount that changes when rounded would print a line that does not add up.
+  const exact = (n: number) => roundMoney(n, currency) === n
   if (data.items.length === 0) throw new Error('Receipt needs at least one item')
   data.items.forEach((item, i) => {
     const n = i + 1
@@ -42,6 +50,7 @@ function validate(data: ReceiptData): void {
     if (!Number.isFinite(item.unitPrice) || item.unitPrice < 0) {
       throw new Error(`Item ${n}: price must be zero or more`)
     }
+    if (!exact(item.unitPrice)) throw new Error(`Item ${n}: price must be ${precision(currency)}`)
   })
   if (!Number.isFinite(data.taxPercent) || data.taxPercent < 0 || data.taxPercent > 100) {
     throw new Error('Tax percent must be between 0 and 100')
@@ -49,8 +58,10 @@ function validate(data: ReceiptData): void {
   if (!Number.isFinite(data.discount) || data.discount < 0) {
     throw new Error('Discount must be zero or more')
   }
-  if (data.paid !== undefined && (!Number.isFinite(data.paid) || data.paid < 0)) {
-    throw new Error('Paid amount must be zero or more')
+  if (!exact(data.discount)) throw new Error(`Discount must be ${precision(currency)}`)
+  if (data.paid !== undefined) {
+    if (!Number.isFinite(data.paid) || data.paid < 0) throw new Error('Paid amount must be zero or more')
+    if (!exact(data.paid)) throw new Error(`Paid amount must be ${precision(currency)}`)
   }
 }
 
