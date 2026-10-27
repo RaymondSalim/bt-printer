@@ -1,5 +1,6 @@
 import { composeLabel } from '../pdf/compose'
 import {
+  closePdf,
   extractLabels,
   openPdf,
   renderLabel,
@@ -11,6 +12,7 @@ import { orderStripDocument } from '../pdf/orderStrip'
 import { readCodes, scanCheck } from '../pdf/scanCheck'
 import { setupZXing } from '../pdf/zxingSetup'
 import { renderDocument } from '../render/render'
+import { awaitStable } from '../util/awaitStable'
 import { el, field } from './dom'
 import { drawMonoPreview } from './monoCanvas'
 
@@ -169,11 +171,15 @@ export function createImportView(): ImportView {
   fileInput.addEventListener('change', async () => {
     const token = ++fileToken
     generation++
+    const previous = pdf
     pdf = null
+    if (previous) void closePdf(previous)
     entries = []
     previewIndex = 0
     list.replaceChildren()
     const file = fileInput.files?.[0]
+    // Clearing the input lets the same filename be chosen again, which would not fire a change event otherwise.
+    fileInput.value = ''
     if (!file) {
       statusEl.textContent = 'Choose a Shopee shipping label PDF.'
       notify()
@@ -183,8 +189,17 @@ export function createImportView(): ImportView {
     notify()
     try {
       const opened = await openPdf(await file.arrayBuffer())
-      const sources = await extractLabels(opened)
-      if (token !== fileToken) return
+      let sources: LabelSource[]
+      try {
+        sources = await extractLabels(opened)
+      } catch (err) {
+        void closePdf(opened)
+        throw err
+      }
+      if (token !== fileToken) {
+        void closePdf(opened)
+        return
+      }
       pdf = opened
       entries = sources.map(makeEntry)
       list.replaceChildren(...entries.map((entry) => entry.row))
@@ -192,7 +207,7 @@ export function createImportView(): ImportView {
       statusEl.textContent =
         sources.length === 0
           ? 'No labels found: the pages look blank.'
-          : `${sources.length} label${sources.length === 1 ? '' : 's'} found.`
+          : `${sources.length} label${sources.length === 1 ? '' : 's'} found in ${file.name}.`
       notify()
       await renderAll()
     } catch (err) {
@@ -221,7 +236,7 @@ export function createImportView(): ImportView {
     previewCanvas: () => entries[previewIndex]?.canvas ?? null,
     selectedCount: () => entries.filter((e) => e.include.checked && e.canvas !== null).length,
     renderSelected: async () => {
-      await rendering
+      await awaitStable(() => rendering)
       return entries.flatMap((e) => (e.include.checked && e.canvas ? [e.canvas] : []))
     },
   }

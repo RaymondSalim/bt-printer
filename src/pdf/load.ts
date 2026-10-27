@@ -1,6 +1,14 @@
 import * as pdfjs from 'pdfjs-dist'
 import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
-import { contentBounds, dotsPerPoint, splitSlots, type GrayImage, type Rect } from './geometry'
+import {
+  contentBounds,
+  dotsPerPoint,
+  isLabelSized,
+  labelsShareCentre,
+  splitSlots,
+  type GrayImage,
+  type Rect,
+} from './geometry'
 import {
   findOrderNumber,
   itemsInRect,
@@ -26,8 +34,14 @@ export interface LabelSource {
   orderNumber: string | null
 }
 
-export function openPdf(data: ArrayBuffer): Promise<PdfDocument> {
-  return pdfjs.getDocument({ data: new Uint8Array(data) }).promise
+export async function openPdf(data: ArrayBuffer): Promise<PdfDocument> {
+  const task = pdfjs.getDocument({ data: new Uint8Array(data) })
+  try {
+    return await task.promise
+  } catch (err) {
+    await task.destroy()
+    throw err
+  }
 }
 
 // Renders `region` (in page points) so that one point covers `scale` pixels.
@@ -57,6 +71,28 @@ function toGray(canvas: HTMLCanvasElement): GrayImage {
   return { width: canvas.width, height: canvas.height, data: gray }
 }
 
+// The loading task owns the worker that holds the parsed document; destroying it frees both.
+export function closePdf(pdf: PdfDocument): Promise<void> {
+  return pdf.loadingTask.destroy()
+}
+
+// Content bounds of each slot, in points relative to that slot.
+async function detectBounds(page: PdfPage, slots: Rect[]): Promise<Array<Rect | null>> {
+  const found: Array<Rect | null> = []
+  for (const slot of slots) {
+    const px = contentBounds(toGray(await renderRegion(page, slot, DETECT_SCALE)), BACKGROUND_THRESHOLD)
+    found.push(
+      px && {
+        x: px.x / DETECT_SCALE,
+        y: px.y / DETECT_SCALE,
+        width: px.width / DETECT_SCALE,
+        height: px.height / DETECT_SCALE,
+      },
+    )
+  }
+  return found
+}
+
 export async function extractLabels(pdf: PdfDocument): Promise<LabelSource[]> {
   const labels: LabelSource[] = []
   for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber++) {
@@ -64,25 +100,23 @@ export async function extractLabels(pdf: PdfDocument): Promise<LabelSource[]> {
     const base = page.getViewport({ scale: 1 })
     const text = await page.getTextContent()
     const items: TextItem[] = text.items.flatMap((item) => ('str' in item ? [item] : []))
-    const slots = splitSlots(base.width, base.height)
+    let slots = splitSlots(base.width, base.height)
+    let found = await detectBounds(page, slots)
+    const [left, right] = found
+    if (left && right && labelsShareCentre(left, right, slots[0].width)) {
+      slots = [{ x: 0, y: 0, width: base.width, height: base.height }]
+      found = await detectBounds(page, slots)
+    }
     for (let slotIndex = 0; slotIndex < slots.length; slotIndex++) {
       const slot = slots[slotIndex]
-      const found = contentBounds(
-        toGray(await renderRegion(page, slot, DETECT_SCALE)),
-        BACKGROUND_THRESHOLD,
-      )
-      if (!found) continue
+      const local = found[slotIndex]
+      if (!local || !isLabelSized(local)) continue
       const slotItems = itemsInRect(items, slot, base.height)
       labels.push({
         pageNumber,
         slotIndex,
         slotCount: slots.length,
-        bounds: {
-          x: slot.x + found.x / DETECT_SCALE,
-          y: slot.y + found.y / DETECT_SCALE,
-          width: found.width / DETECT_SCALE,
-          height: found.height / DETECT_SCALE,
-        },
+        bounds: { x: slot.x + local.x, y: slot.y + local.y, width: local.width, height: local.height },
         tableTop: productTableTop(slotItems, base.height),
         orderNumber: findOrderNumber(slotItems),
       })

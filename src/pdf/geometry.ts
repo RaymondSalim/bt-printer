@@ -50,3 +50,18 @@ export function dotsPerPoint(widthPt: number, targetDots: number): number {
   if (!(widthPt > 0)) throw new RangeError(`widthPt must be positive, got ${widthPt}`)
   return targetDots / widthPt
 }
+
+const MIN_LABEL_PT = 24
+const EDGE_TOUCH_PT = 4
+
+// A slot only counts as a label when its content is big enough that scanner
+// speckle or a stray mark cannot pass for one.
+export function isLabelSized(bounds: Rect): boolean {
+  return bounds.width >= MIN_LABEL_PT && bounds.height >= MIN_LABEL_PT
+}
+
+// Bounds are relative to their own slot. Two real labels each stop short of the
+// centre strip; when both run into it, the page holds a single wide label.
+export function labelsShareCentre(left: Rect, right: Rect, slotWidth: number): boolean {
+  return left.x + left.width >= slotWidth - EDGE_TOUCH_PT && right.x <= EDGE_TOUCH_PT
+}

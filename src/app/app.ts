@@ -93,7 +93,13 @@ export function createApp(root: HTMLElement): void {
     try {
       if (mode === 'import') {
         current = forms.import.previewCanvas()
-        if (current) drawMonoPreview(current, preview)
+        if (current) {
+          drawMonoPreview(current, preview)
+        } else {
+          // Resizing a canvas clears it, so a stale label never stays on screen.
+          preview.width = 576
+          preview.height = 16
+        }
         errorEl.textContent = ''
       } else {
         const doc =

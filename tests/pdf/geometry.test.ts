@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import { contentBounds, dotsPerPoint, splitSlots, type GrayImage } from '../../src/pdf/geometry'
+import {
+  contentBounds,
+  dotsPerPoint,
+  isLabelSized,
+  labelsShareCentre,
+  splitSlots,
+  type GrayImage,
+} from '../../src/pdf/geometry'
 
 function gray(width: number, height: number, paint: (x: number, y: number) => number): GrayImage {
   const data = new Uint8ClampedArray(width * height)
@@ -57,5 +64,35 @@ describe('dotsPerPoint', () => {
   it('rejects a non-positive width', () => {
     expect(() => dotsPerPoint(0, 552)).toThrow(RangeError)
     expect(() => dotsPerPoint(-5, 552)).toThrow(RangeError)
+  })
+})
+
+describe('isLabelSized', () => {
+  it('rejects specks and thin lines and accepts a real label', () => {
+    expect(isLabelSized({ x: 0, y: 0, width: 1, height: 1 })).toBe(false)
+    expect(isLabelSized({ x: 0, y: 0, width: 300, height: 10 })).toBe(false)
+    expect(isLabelSized({ x: 0, y: 0, width: 300, height: 400 })).toBe(true)
+  })
+})
+
+describe('labelsShareCentre', () => {
+  const slotWidth = 415
+
+  it('is true when both labels run into the centre strip, so the page holds one wide label', () => {
+    const left = { x: 20, y: 20, width: 395, height: 500 }
+    const right = { x: 0, y: 20, width: 380, height: 500 }
+    expect(labelsShareCentre(left, right, slotWidth)).toBe(true)
+  })
+
+  it('is false for two separate labels with margin before the centre', () => {
+    const left = { x: 5, y: 10, width: 390, height: 500 }
+    const right = { x: 12, y: 10, width: 390, height: 500 }
+    expect(labelsShareCentre(left, right, slotWidth)).toBe(false)
+  })
+
+  it('is false when only one side touches the centre', () => {
+    const left = { x: 20, y: 20, width: 395, height: 500 }
+    const right = { x: 40, y: 20, width: 300, height: 500 }
+    expect(labelsShareCentre(left, right, slotWidth)).toBe(false)
   })
 })
