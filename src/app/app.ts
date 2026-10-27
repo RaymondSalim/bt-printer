@@ -1,4 +1,3 @@
-import { monoPreview } from '../encode/raster'
 import { PrintInterruptedError } from '../printer/send'
 import { WebBluetoothPrinter } from '../printer/webBluetooth'
 import { renderDocument } from '../render/render'
@@ -6,17 +5,23 @@ import { buildLabel } from '../templates/label'
 import { buildReceipt } from '../templates/receipt'
 import { exclusive } from '../util/exclusive'
 import { parseLabelForm, parseReceiptForm } from './forms'
+import { createImportView } from './importView'
 import { createLabelForm } from './labelForm'
+import { drawMonoPreview } from './monoCanvas'
 import { printImage } from './print'
 import { createReceiptForm } from './receiptForm'
 
-type Mode = 'receipt' | 'label'
+type Mode = 'receipt' | 'label' | 'import'
 
 const message = (err: unknown) => (err instanceof Error ? err.message : String(err))
 
 export function createApp(root: HTMLElement): void {
   const printer = new WebBluetoothPrinter()
-  const forms = { receipt: createReceiptForm(), label: createLabelForm() }
+  const forms = {
+    receipt: createReceiptForm(),
+    label: createLabelForm(),
+    import: createImportView(),
+  }
   let mode: Mode = 'receipt'
   let current: HTMLCanvasElement | null = null
   let abort: AbortController | null = null
@@ -30,6 +35,7 @@ export function createApp(root: HTMLElement): void {
       <nav>
         <button data-mode="receipt">Receipt</button>
         <button data-mode="label">Shipping label</button>
+        <button data-mode="import">Import PDF</button>
       </nav>
     </header>
     <div class="cols">
@@ -75,28 +81,30 @@ export function createApp(root: HTMLElement): void {
   }
 
   function updateButtons(): void {
+    const ready = mode === 'import' ? forms.import.selectedCount() > 0 : current !== null
     connEl.textContent = printer.connected ? 'Connected' : 'Not connected'
     connectBtn.textContent = printer.connected ? 'Disconnect' : 'Connect printer'
     connectBtn.disabled = busy
-    printBtn.disabled = busy || !printer.connected || current === null
+    printBtn.disabled = busy || !printer.connected || !ready
     cancelBtn.disabled = !busy || abort === null
   }
 
   function refresh(): void {
     try {
-      const doc =
-        mode === 'receipt'
-          ? buildReceipt(parseReceiptForm(forms.receipt.read()))
-          : buildLabel(parseLabelForm(forms.label.read()))
-      const canvas = renderDocument(doc)
-      const img = canvas.getContext('2d')!.getImageData(0, 0, canvas.width, canvas.height)
-      preview.width = canvas.width
-      preview.height = canvas.height
-      preview
-        .getContext('2d')!
-        .putImageData(new ImageData(monoPreview(img), img.width, img.height), 0, 0)
-      current = canvas
-      errorEl.textContent = ''
+      if (mode === 'import') {
+        current = forms.import.previewCanvas()
+        if (current) drawMonoPreview(current, preview)
+        errorEl.textContent = ''
+      } else {
+        const doc =
+          mode === 'receipt'
+            ? buildReceipt(parseReceiptForm(forms.receipt.read()))
+            : buildLabel(parseLabelForm(forms.label.read()))
+        const canvas = renderDocument(doc)
+        drawMonoPreview(canvas, preview)
+        current = canvas
+        errorEl.textContent = ''
+      }
     } catch (err) {
       current = null
       errorEl.textContent = message(err)
@@ -118,6 +126,7 @@ export function createApp(root: HTMLElement): void {
   })
   forms.receipt.onChange(refresh)
   forms.label.onChange(refresh)
+  forms.import.onChange(refresh)
   printer.onDisconnected(() => {
     log('Printer disconnected')
     updateButtons()
@@ -147,26 +156,34 @@ export function createApp(root: HTMLElement): void {
   connectBtn.addEventListener('click', () => void toggleConnection())
 
   const doPrint = exclusive(async () => {
-    if (!current) return
-    const canvas = current
-    const img = canvas.getContext('2d')!.getImageData(0, 0, canvas.width, canvas.height)
+    const canvases =
+      mode === 'import' ? await forms.import.renderSelected() : current ? [current] : []
+    if (canvases.length === 0) return
     abort = new AbortController()
     busy = true
     progress.value = 0
     updateButtons()
     try {
-      const outcome = await printImage(printer, img, {
-        confirmWarnings: async (warnings) =>
-          window.confirm(`${warnings.join('\n')}\n\nPrint anyway?`),
-        onProgress: (sent, total) => {
-          progress.max = total
-          progress.value = sent
-        },
-        signal: abort.signal,
-        resyncFirst: needsResync,
-      })
-      if (outcome === 'printed') needsResync = false
-      log(outcome === 'printed' ? 'Printed' : 'Cancelled before printing')
+      for (const [index, canvas] of canvases.entries()) {
+        if (canvases.length > 1) log(`Printing label ${index + 1} of ${canvases.length}`)
+        const img = canvas.getContext('2d')!.getImageData(0, 0, canvas.width, canvas.height)
+        const outcome = await printImage(printer, img, {
+          confirmWarnings: async (warnings) =>
+            window.confirm(`${warnings.join('\n')}\n\nPrint anyway?`),
+          onProgress: (sent, total) => {
+            progress.max = total
+            progress.value = sent
+          },
+          signal: abort.signal,
+          resyncFirst: needsResync,
+        })
+        if (outcome !== 'printed') {
+          log('Cancelled before printing')
+          return
+        }
+        needsResync = false
+      }
+      log(canvases.length > 1 ? `Printed ${canvases.length} labels` : 'Printed')
     } catch (err) {
       if (err instanceof PrintInterruptedError) {
         if (err.reason === 'write-failed') needsResync = true

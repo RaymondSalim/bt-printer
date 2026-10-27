@@ -15,3 +15,9 @@ nav button.active { font-weight: 700; text-decoration: underline; }
 #log { background: #f4f4f5; padding: 8px; min-height: 6em; max-height: 12em; overflow: auto; margin: 8px 0 0; }
 progress { width: 100%; margin-top: 8px; }
 .field input[type='checkbox'] { justify-self: start; }
+
+.import-list { display: grid; gap: 12px; margin-top: 8px; }
+.entry { border: 1px solid #d4d4d8; border-radius: 6px; padding: 8px; }
+.entry.preview { outline: 2px solid #2563eb; }
+.thumb { display: block; width: 100%; max-width: 280px; height: auto; margin-top: 6px; border: 1px dashed #a1a1aa; cursor: pointer; background: #fff; }
+.note, .import-status { margin: 6px 0 0; color: #52525b; }
