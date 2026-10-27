@@ -3,10 +3,11 @@ import { monoPreview, type RgbaImage } from '../encode/raster'
 
 const FORMATS = ['Code128', 'QRCode'] as Array<'Code128' | 'QRCode'>
 
-// Strict decoding stands in for a basic handheld scanner: no extra effort,
-// rotation, inversion or downscaling.
+// A handheld scanner sweeps many lines across a barcode, so row sampling stays on;
+// it does not rotate, invert or downscale the image, so a barcode that only reads
+// after such help does not count as scannable.
 const STRICT = {
-  tryHarder: false,
+  tryHarder: true,
   tryRotate: false,
   tryInvert: false,
   tryDownscale: false,

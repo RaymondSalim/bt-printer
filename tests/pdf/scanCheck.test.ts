@@ -56,3 +56,26 @@ describe('readCodes and scanCheck', () => {
     })
   })
 })
+
+describe('scanCheck with several barcodes in one image', () => {
+  it('reads every one of several stacked barcodes and a QR code', async () => {
+    const layout = layoutDocument(
+      {
+        blocks: [
+          { type: 'barcode', data: 'CM00000000001', height: 120 },
+          { type: 'spacer', height: 30 },
+          { type: 'qr', data: 'CM00000000001', size: 150 },
+          { type: 'barcode', data: '260101TESTAA01', height: 64 },
+          { type: 'barcode', data: 'SPXID000000000001', height: 64 },
+        ],
+      },
+      measure,
+    )
+    const result = await scanCheck(rasterize(layout), [
+      'CM00000000001',
+      '260101TESTAA01',
+      'SPXID000000000001',
+    ])
+    expect(result.missing).toEqual([])
+  })
+})

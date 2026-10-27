@@ -18,7 +18,7 @@
 - Landscape pages (width at least 1.2 times height) hold two label slots separated by a 6-point gap on each side of the centre; other pages hold one slot. A slot with no dark content is skipped.
 - The order barcode is a fresh Code 128 (set B) drawn by the app at two dots per bar or wider. In automatic mode it is added only when the label's own barcodes do not already read the order number after fitting; it is skipped, with a visible note, when the order number is missing, not printable ASCII, or too long to fit.
 - Text-layer findings come from pdf.js text items; label pixels come from rendering the PDF region directly at the target scale, never from resampling a rendered image.
-- Barcode verification decodes the thresholded final image with zxing-wasm in strict mode (no try-harder, rotate, invert or downscale), and requires every code that a lenient decode of a 300 dpi render of the original label can read.
+- Barcode verification decodes the thresholded final image with zxing-wasm with row sampling on but no rotate, invert or downscale, and requires every code that a lenient decode of a 300 dpi render of the original label can read.
 - New dependencies are limited to `pdfjs-dist` and `zxing-wasm`.
 - PDFs are user data: they are read in the browser only, never uploaded, never written to the repository.
 - Commit messages must not mention any AI tool and must not carry attribution trailers.
@@ -1026,7 +1026,7 @@ Expected: all green.
 **Interfaces:**
 - Consumes: `monoPreview`, `RgbaImage` (`src/encode/raster.ts`), `Layout`, `layoutDocument` (`src/render/layout.ts`), everything from Task 3.
 - Produces:
-  - `src/pdf/scanCheck.ts`: `interface ScanResult { found: string[]; missing: string[] }`; `compareScan(expected: string[], found: string[]): ScanResult`; `readCodes(img: RgbaImage, mode: 'printed' | 'reference'): Promise<string[]>` (Code 128 and QR codes; `printed` thresholds the image to 1 bit and decodes in strict mode, `reference` decodes the image as given with every decoder effort enabled); `scanCheck(img: RgbaImage, expected: string[]): Promise<ScanResult>` (the `printed` read compared with the expectation)
+  - `src/pdf/scanCheck.ts`: `interface ScanResult { found: string[]; missing: string[] }`; `compareScan(expected: string[], found: string[]): ScanResult`; `readCodes(img: RgbaImage, mode: 'printed' | 'reference'): Promise<string[]>` (Code 128 and QR codes; `printed` thresholds the image to 1 bit and decodes with row sampling on but no rotate, invert or downscale, `reference` decodes the image as given with every decoder effort enabled); `scanCheck(img: RgbaImage, expected: string[]): Promise<ScanResult>` (the `printed` read compared with the expectation)
   - `src/pdf/zxingSetup.ts`: `setupZXing(): Promise<unknown>`, browser-only; points the decoder at the bundled wasm file instead of its default CDN
   - `src/pdf/load.ts`: `renderLabelReference(pdf, source): Promise<HTMLCanvasElement>` (the label area at 300 dpi)
   - `tests/helpers/rasterize.ts`: `rasterize(layout: Layout): RgbaImage`, drawing rects, QR modules and barcode bars on white
@@ -1158,10 +1158,11 @@ import { monoPreview, type RgbaImage } from '../encode/raster'
 
 const FORMATS = ['Code128', 'QRCode'] as Array<'Code128' | 'QRCode'>
 
-// Strict decoding stands in for a basic handheld scanner: no extra effort,
-// rotation, inversion or downscaling.
+// A handheld scanner sweeps many lines across a barcode, so row sampling stays on;
+// it does not rotate, invert or downscale the image, so a barcode that only reads
+// after such help does not count as scannable.
 const STRICT = {
-  tryHarder: false,
+  tryHarder: true,
   tryRotate: false,
   tryInvert: false,
   tryDownscale: false,
