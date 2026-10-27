@@ -1,5 +1,7 @@
-import * as pdfjs from 'pdfjs-dist'
-import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
+// The legacy build carries polyfills and older syntax so it also runs on the Safari versions
+// found on older iPads and iPhones, which cannot run the standard build.
+import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs'
+import workerUrl from 'pdfjs-dist/legacy/build/pdf.worker.min.mjs?url'
 import {
   contentBounds,
   dotsPerPoint,

@@ -36,6 +36,18 @@ interface Entry {
 }
 
 const message = (err: unknown) => (err instanceof Error ? err.message : String(err))
+
+// Browser or library incompatibilities surface as these error types; their first stack frames
+// say where, which is the only clue on a device without a console.
+const ENVIRONMENT_ERRORS = new Set(['TypeError', 'ReferenceError', 'RangeError', 'SyntaxError'])
+const errorLocation = (err: unknown): string => {
+  if (!(err instanceof Error) || !ENVIRONMENT_ERRORS.has(err.name) || !err.stack) return ''
+  const frames = err.stack
+    .split('\n')
+    .slice(0, 2)
+    .map((line) => line.trim().slice(-100))
+  return ` [${frames.join(' | ')}]`
+}
 const imageOf = (canvas: HTMLCanvasElement) =>
   canvas.getContext('2d')!.getImageData(0, 0, canvas.width, canvas.height)
 
@@ -212,7 +224,7 @@ export function createImportView(): ImportView {
       await renderAll()
     } catch (err) {
       if (token !== fileToken) return
-      statusEl.textContent = `Could not read the PDF: ${message(err)}`
+      statusEl.textContent = `Could not read the PDF: ${message(err)}${errorLocation(err)}`
       notify()
     }
   })
