@@ -104,3 +104,14 @@ export async function renderLabel(
   }
   return renderRegion(page, region, dotsPerPoint(region.width, LABEL_WIDTH_DOTS))
 }
+
+const REFERENCE_DPI = 300
+
+// A sharp render of the whole label area, used only to find out which barcodes the original contains.
+export async function renderLabelReference(
+  pdf: PdfDocument,
+  source: LabelSource,
+): Promise<HTMLCanvasElement> {
+  const page = await pdf.getPage(source.pageNumber)
+  return renderRegion(page, source.bounds, REFERENCE_DPI / 72)
+}

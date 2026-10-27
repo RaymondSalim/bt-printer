@@ -1,6 +1,15 @@
 import { composeLabel } from '../pdf/compose'
-import { extractLabels, openPdf, renderLabel, type LabelSource, type PdfDocument } from '../pdf/load'
+import {
+  extractLabels,
+  openPdf,
+  renderLabel,
+  renderLabelReference,
+  type LabelSource,
+  type PdfDocument,
+} from '../pdf/load'
 import { orderStripDocument } from '../pdf/orderStrip'
+import { readCodes, scanCheck } from '../pdf/scanCheck'
+import { setupZXing } from '../pdf/zxingSetup'
 import { renderDocument } from '../render/render'
 import { el, field } from './dom'
 import { drawMonoPreview } from './monoCanvas'
@@ -19,10 +28,14 @@ interface Entry {
   include: HTMLInputElement
   thumb: HTMLCanvasElement
   note: HTMLElement
+  scan: HTMLElement
   canvas: HTMLCanvasElement | null
+  reference: Promise<string[]> | null
 }
 
 const message = (err: unknown) => (err instanceof Error ? err.message : String(err))
+const imageOf = (canvas: HTMLCanvasElement) =>
+  canvas.getContext('2d')!.getImageData(0, 0, canvas.width, canvas.height)
 
 export function createImportView(): ImportView {
   const listeners: Array<() => void> = []
@@ -36,7 +49,11 @@ export function createImportView(): ImportView {
 
   const fileInput = el('input', { type: 'file', accept: 'application/pdf,.pdf' })
   const includeProducts = el('input', { type: 'checkbox', checked: true })
-  const addOrderBarcode = el('input', { type: 'checkbox', checked: true })
+  const orderMode = el('select', {}, [
+    el('option', { value: 'auto', textContent: 'Automatic (only when needed)' }),
+    el('option', { value: 'always', textContent: 'Always' }),
+    el('option', { value: 'never', textContent: 'Never' }),
+  ])
   const statusEl = el('p', {
     className: 'import-status',
     textContent: 'Choose a Shopee shipping label PDF.',
@@ -54,8 +71,9 @@ export function createImportView(): ImportView {
     const title = el('span', { textContent: `Page ${source.pageNumber}${where}${order}` })
     const thumb = el('canvas', { className: 'thumb' })
     const note = el('p', { className: 'note' })
-    const row = el('div', { className: 'entry' }, [el('label', {}, [include, title]), thumb, note])
-    const entry: Entry = { source, row, include, thumb, note, canvas: null }
+    const scan = el('p', { className: 'scan' })
+    const row = el('div', { className: 'entry' }, [el('label', {}, [include, title]), thumb, note, scan])
+    const entry: Entry = { source, row, include, thumb, note, scan, canvas: null, reference: null }
     include.addEventListener('change', notify)
     thumb.addEventListener('click', () => {
       previewIndex = entries.indexOf(entry)
@@ -67,24 +85,60 @@ export function createImportView(): ImportView {
 
   async function build(
     entry: Entry,
-    document_: PdfDocument,
+    doc: PdfDocument,
   ): Promise<{ canvas: HTMLCanvasElement; notes: string[] }> {
     const notes: string[] = []
-    const label = await renderLabel(document_, entry.source, {
-      includeProducts: includeProducts.checked,
-    })
-    let strip: HTMLCanvasElement | null = null
-    if (addOrderBarcode.checked) {
-      const order = entry.source.orderNumber
+    const label = await renderLabel(doc, entry.source, { includeProducts: includeProducts.checked })
+    const order = entry.source.orderNumber
+    const stripDoc = order ? orderStripDocument(order) : null
+    const mode = orderMode.value
+    let withStrip = false
+    if (mode !== 'never') {
       if (!order) {
         notes.push('No order number found in the PDF text, so no order barcode was added.')
+      } else if (!stripDoc) {
+        notes.push(`Order number ${order} cannot be drawn as a Code 128 barcode at this width.`)
+      } else if (mode === 'always') {
+        withStrip = true
       } else {
-        const doc = orderStripDocument(order)
-        if (doc) strip = renderDocument(doc)
-        else notes.push(`Order number ${order} cannot be drawn as a Code 128 barcode at this width.`)
+        try {
+          await setupZXing()
+          const { missing } = await scanCheck(imageOf(composeLabel(label, null)), [order])
+          withStrip = missing.length > 0
+          if (!withStrip) {
+            notes.push(`The label's own barcode already reads ${order}, so no extra barcode was added.`)
+          }
+        } catch {
+          withStrip = true
+        }
       }
     }
-    return { canvas: composeLabel(label, strip), notes }
+    return { canvas: composeLabel(label, withStrip && stripDoc ? renderDocument(stripDoc) : null), notes }
+  }
+
+  async function checkScan(entry: Entry, canvas: HTMLCanvasElement, doc: PdfDocument): Promise<void> {
+    entry.scan.className = 'scan'
+    entry.scan.textContent = 'Checking barcodes...'
+    try {
+      await setupZXing()
+      entry.reference ??= renderLabelReference(doc, entry.source).then((reference) =>
+        readCodes(imageOf(reference), 'reference'),
+      )
+      const expected = [...new Set(await entry.reference)]
+      if (expected.length === 0) {
+        entry.scan.textContent = 'Scan check skipped: no barcode could be read from the original PDF.'
+        return
+      }
+      const { missing } = await scanCheck(imageOf(canvas), expected)
+      if (missing.length === 0) {
+        entry.scan.textContent = `Scan check passed: ${expected.join(', ')} readable in the printed image.`
+      } else {
+        entry.scan.className = 'scan fail'
+        entry.scan.textContent = `Scan check FAILED: could not read ${missing.join(', ')} in the printed image.`
+      }
+    } catch (err) {
+      entry.scan.textContent = `Scan check unavailable: ${message(err)}`
+    }
   }
 
   function renderAll(): Promise<void> {
@@ -99,6 +153,8 @@ export function createImportView(): ImportView {
           entry.canvas = canvas
           drawMonoPreview(canvas, entry.thumb)
           entry.note.textContent = notes.join(' ')
+          await checkScan(entry, canvas, target)
+          if (mine !== generation) return
         } catch (err) {
           if (mine !== generation) return
           entry.canvas = null
@@ -146,13 +202,13 @@ export function createImportView(): ImportView {
     }
   })
   includeProducts.addEventListener('change', () => void renderAll())
-  addOrderBarcode.addEventListener('change', () => void renderAll())
+  orderMode.addEventListener('change', () => void renderAll())
 
   const element = el('div', { className: 'form' })
   element.append(
     field('PDF file', fileInput),
     field('Include product list', includeProducts),
-    field('Add order barcode', addOrderBarcode),
+    field('Order barcode', orderMode),
     statusEl,
     list,
   )

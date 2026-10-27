@@ -21,3 +21,6 @@ progress { width: 100%; margin-top: 8px; }
 .entry.preview { outline: 2px solid #2563eb; }
 .thumb { display: block; width: 100%; max-width: 280px; height: auto; margin-top: 6px; border: 1px dashed #a1a1aa; cursor: pointer; background: #fff; }
 .note, .import-status { margin: 6px 0 0; color: #52525b; }
+
+.scan { margin: 6px 0 0; color: #166534; }
+.scan.fail { color: #b91c1c; font-weight: 600; }
