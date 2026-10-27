@@ -10,15 +10,15 @@
 
 **Spec:** `docs/superpowers/specs/2026-10-12-bt-printer-web-app-design.md` (milestone 4). Samples and measurements: `docs/printer-findings.md`, section "Shopee shipping label PDFs".
 
-**Scope note:** This plan covers PDF import for Shopee labels only. CSV batch printing and sticker (gapped) mode are separate later plans. The three sample PDFs the owner supplied are A4 landscape with the label in the left half and a dashed cut line at the centre. They contain buyer names and addresses, so they must never be committed or copied into docs; the browser smoke check copies them into `.playwright-mcp/` (excluded from git) only.
+**Scope note:** This plan covers PDF import for Shopee labels only. Two layouts were measured: the A4 landscape page (one or two labels per page) and the A6 portrait thermal page (one label filling the page, scaled to about 69 percent). CSV batch printing and sticker (gapped) mode are separate later plans. The three sample PDFs the owner supplied are A4 landscape with the label in the left half and a dashed cut line at the centre. They contain buyer names and addresses, so they must never be committed or copied into docs; the browser smoke check copies them into `.playwright-mcp/` (excluded from git) only.
 
 ## Global Constraints
 
 - Print width is 576 dots; a label is rendered exactly 552 dots wide and centred, which leaves 12 dots of margin on each side.
 - Landscape pages (width at least 1.2 times height) hold two label slots separated by a 6-point gap on each side of the centre; other pages hold one slot. A slot with no dark content is skipped.
-- The order barcode is a fresh Code 128 (set B) drawn by the app at two dots per bar or wider; it is skipped, with a visible note, when the order number is missing, not printable ASCII, or too long to fit.
+- The order barcode is a fresh Code 128 (set B) drawn by the app at two dots per bar or wider. In automatic mode it is added only when the label's own barcodes do not already read the order number after fitting; it is skipped, with a visible note, when the order number is missing, not printable ASCII, or too long to fit.
 - Text-layer findings come from pdf.js text items; label pixels come from rendering the PDF region directly at the target scale, never from resampling a rendered image.
-- Barcode verification decodes the thresholded final image with zxing-wasm in strict mode (no try-harder, rotate, invert or downscale).
+- Barcode verification decodes the thresholded final image with zxing-wasm in strict mode (no try-harder, rotate, invert or downscale), and requires every code that a lenient decode of a 300 dpi render of the original label can read.
 - New dependencies are limited to `pdfjs-dist` and `zxing-wasm`.
 - PDFs are user data: they are read in the browser only, never uploaded, never written to the repository.
 - Commit messages must not mention any AI tool and must not carry attribution trailers.
@@ -44,9 +44,9 @@
 - Consumes: nothing.
 - Produces:
   - `src/pdf/geometry.ts`: `interface Rect { x: number; y: number; width: number; height: number }`; `interface GrayImage { width: number; height: number; data: Uint8ClampedArray }` (one byte per pixel); `SLOT_GAP_PT = 6`; `splitSlots(pageWidth: number, pageHeight: number): Rect[]`; `contentBounds(img: GrayImage, threshold?: number): Rect | null` (pixel rectangle around every pixel darker than `threshold`, default 200; `null` when none); `dotsPerPoint(widthPt: number, targetDots: number): number`
-  - `src/pdf/labelText.ts`: `interface TextItem { str: string; transform: number[]; width: number; height: number }`; `itemTop(item, pageHeight): number`; `itemsInRect(items, rect, pageHeight): TextItem[]`; `findOrderNumber(items): string | null`; `findResiNumber(items, pageHeight): string | null`; `productTableTop(items, pageHeight): number | null`
+  - `src/pdf/labelText.ts`: `interface TextItem { str: string; transform: number[]; width: number; height: number }`; `itemTop(item, pageHeight): number`; `itemsInRect(items, rect, pageHeight): TextItem[]`; `findOrderNumber(items): string | null`; `productTableTop(items, pageHeight): number | null`
 
-pdf.js text items use PDF space (origin bottom-left, `transform[4]` is x and `transform[5]` the baseline y). `itemTop` converts to page space (origin top-left): `pageHeight - transform[5] - height`. Order numbers appear as `No. Pesanan: <code>` or `No.Pesanan: <code>`, with `Pesan: (<code>)` as a fallback. The resi appears either in one item (`No. Resi: CM0195...`) or as a label item followed by a separate code item just below it. The product table starts at the item `Nama Produk`.
+pdf.js text items use PDF space (origin bottom-left, `transform[4]` is x and `transform[5]` the baseline y). `itemTop` converts to page space (origin top-left): `pageHeight - transform[5] - height`. Order numbers appear as `No. Pesanan: <code>` or `No.Pesanan: <code>`, with `Pesan: (<code>)` as a fallback. The product table starts at the item `Nama Produk`.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -120,7 +120,6 @@ Create `tests/pdf/labelText.test.ts`:
 import { describe, expect, it } from 'vitest'
 import {
   findOrderNumber,
-  findResiNumber,
   itemTop,
   itemsInRect,
   productTableTop,
@@ -170,32 +169,6 @@ describe('findOrderNumber', () => {
 
   it('returns null when neither form is present', () => {
     expect(findOrderNumber([item('Berat: 500 gr', 9, 300)])).toBeNull()
-  })
-})
-
-describe('findResiNumber', () => {
-  it('reads a resi that is in the same text item as its label', () => {
-    expect(findResiNumber([item('No. Resi: CM00000000001', 207, 540, 12.7)], PAGE_H)).toBe(
-      'CM00000000001',
-    )
-  })
-
-  it('reads a resi in a separate item just below the label and ignores repeated copies elsewhere', () => {
-    const items = [
-      item('No. Resi:', 313, 526, 10.5),
-      item('SPXID000000000001', 285, 515.5, 10.5),
-      item('SPXID000000000001', 412, 541.5, 10.5),
-      item('SPXID000000000001', 412, 443.5, 10.5),
-    ]
-    expect(findResiNumber(items, PAGE_H)).toBe('SPXID000000000001')
-  })
-
-  it('returns null when the label has no code near it', () => {
-    expect(findResiNumber([item('No. Resi:', 313, 526, 10.5)], PAGE_H)).toBeNull()
-  })
-
-  it('returns null when there is no resi label at all', () => {
-    expect(findResiNumber([item('Berat: 500 gr', 9, 300)], PAGE_H)).toBeNull()
   })
 })
 
@@ -313,33 +286,6 @@ export function findOrderNumber(items: TextItem[]): string | null {
     if (match) return match[1]
   }
   return null
-}
-
-const RESI = /No\.?\s*Resi\s*:?\s*([A-Za-z0-9]+)/i
-const RESI_LABEL = /^\s*No\.?\s*Resi\s*:?\s*$/i
-const CODE = /^[A-Za-z0-9]{8,}$/
-
-// Some layouts put the code in its own item below the "No. Resi:" label, and
-// repeat it elsewhere on the page; only a code just below the label counts.
-export function findResiNumber(items: TextItem[], pageHeight: number): string | null {
-  for (const item of items) {
-    const match = RESI.exec(item.str)
-    if (match) return match[1]
-  }
-  const label = items.find((item) => RESI_LABEL.test(item.str))
-  if (!label) return null
-  const labelTop = itemTop(label, pageHeight)
-  let best: { text: string; distance: number } | null = null
-  for (const item of items) {
-    const text = item.str.trim()
-    if (!CODE.test(text)) continue
-    const dy = itemTop(item, pageHeight) - labelTop
-    const dx = Math.abs(item.transform[4] - label.transform[4])
-    if (dy < 0 || dy > 25 || dx > 120) continue
-    const distance = dy + dx
-    if (!best || distance < best.distance) best = { text, distance }
-  }
-  return best?.text ?? null
 }
 
 export function productTableTop(items: TextItem[], pageHeight: number): number | null {
@@ -466,9 +412,9 @@ git commit -m "feat: add the order barcode strip for imported labels"
 - Modify: `src/app/app.ts` (full replacement below), `src/app/style.css` (append)
 
 **Interfaces:**
-- Consumes: Task 1 (`splitSlots`, `contentBounds`, `dotsPerPoint`, `Rect`, `GrayImage`, `TextItem`, `itemsInRect`, `findOrderNumber`, `findResiNumber`, `productTableTop`), Task 2 (`orderStripDocument`), existing `renderDocument`, `monoPreview`, `printImage`, `exclusive`, `el`, `field`, `FormView`.
+- Consumes: Task 1 (`splitSlots`, `contentBounds`, `dotsPerPoint`, `Rect`, `GrayImage`, `TextItem`, `itemsInRect`, `findOrderNumber`, `productTableTop`), Task 2 (`orderStripDocument`), existing `renderDocument`, `monoPreview`, `printImage`, `exclusive`, `el`, `field`, `FormView`.
 - Produces:
-  - `src/pdf/load.ts`: `type PdfDocument`; `LABEL_WIDTH_DOTS = 552`; `interface LabelSource { pageNumber: number; slotIndex: number; slotCount: number; bounds: Rect; tableTop: number | null; orderNumber: string | null; resiNumber: string | null }` (`bounds` is the trimmed label area in page points); `openPdf(data: ArrayBuffer): Promise<PdfDocument>`; `extractLabels(pdf): Promise<LabelSource[]>`; `renderLabel(pdf, source, opts: { includeProducts: boolean }): Promise<HTMLCanvasElement>` (a canvas exactly 552 dots wide)
+  - `src/pdf/load.ts`: `type PdfDocument`; `LABEL_WIDTH_DOTS = 552`; `interface LabelSource { pageNumber: number; slotIndex: number; slotCount: number; bounds: Rect; tableTop: number | null; orderNumber: string | null }` (`bounds` is the trimmed label area in page points); `openPdf(data: ArrayBuffer): Promise<PdfDocument>`; `extractLabels(pdf): Promise<LabelSource[]>`; `renderLabel(pdf, source, opts: { includeProducts: boolean }): Promise<HTMLCanvasElement>` (a canvas exactly 552 dots wide)
   - `src/pdf/compose.ts`: `composeLabel(label: HTMLCanvasElement, strip: HTMLCanvasElement | null): HTMLCanvasElement` (a 576-dot-wide canvas: the label centred with an 8-dot margin, the strip stacked under it)
   - `src/app/monoCanvas.ts`: `drawMonoPreview(source: HTMLCanvasElement, target: HTMLCanvasElement): void`
   - `src/app/importView.ts`: `interface ImportView { element: HTMLElement; onChange(cb: () => void): void; previewCanvas(): HTMLCanvasElement | null; selectedCount(): number; renderSelected(): Promise<HTMLCanvasElement[]> }`; `createImportView(): ImportView`
@@ -492,7 +438,6 @@ import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 import { contentBounds, dotsPerPoint, splitSlots, type GrayImage, type Rect } from './geometry'
 import {
   findOrderNumber,
-  findResiNumber,
   itemsInRect,
   productTableTop,
   type TextItem,
@@ -514,7 +459,6 @@ export interface LabelSource {
   bounds: Rect
   tableTop: number | null
   orderNumber: string | null
-  resiNumber: string | null
 }
 
 export function openPdf(data: ArrayBuffer): Promise<PdfDocument> {
@@ -576,7 +520,6 @@ export async function extractLabels(pdf: PdfDocument): Promise<LabelSource[]> {
         },
         tableTop: productTableTop(slotItems, base.height),
         orderNumber: findOrderNumber(slotItems),
-        resiNumber: findResiNumber(slotItems, base.height),
       })
     }
   }
@@ -1050,20 +993,21 @@ git commit -m "feat: import Shopee shipping label PDFs in a new app tab"
 
 - [ ] **Step 8: Browser smoke check with the real sample PDFs**
 
-Copy the three sample PDFs into the git-excluded folder so the browser tool may read them (they contain buyer details, so never `git add` them):
+Copy the four sample PDFs into the git-excluded folder so the browser tool may read them (they contain buyer details, so never `git add` them):
 ```bash
 mkdir -p .playwright-mcp/samples
 cp "/Users/rsalim/.paseo/uploads/upload_50c5dcd1-201d-4bf5-bf7d-b2a9f6a0b803/Label Pengiriman.pdf" .playwright-mcp/samples/jne.pdf
 cp "/Users/rsalim/.paseo/uploads/upload_373e3161-3530-42b9-9e53-c449a8903039/Label Pengiriman (2).pdf" .playwright-mcp/samples/spx2.pdf
 cp "/Users/rsalim/.paseo/uploads/upload_e9a14c4e-e116-416d-b528-688897f713ee/Label Pengiriman (1).pdf" .playwright-mcp/samples/spx1.pdf
+cp "/Users/rsalim/.paseo/uploads/upload_d6770d14-1cef-44f8-bb60-a4be64769605/Shopee Seller Centre.pdf" .playwright-mcp/samples/thermal.pdf
 ```
-Run `npm run dev -- --port 5173` in the background. With the Playwright MCP tools (load `browser_file_upload` through ToolSearch), open `http://localhost:5173`, click the "Import PDF" tab and upload each sample in turn into the file input. For each, verify with `browser_evaluate`:
-1. exactly one `.entry` (the right-hand slot is empty), whose title contains the expected order number: `260101TESTAA01` for `jne.pdf`, `260101TESTBB02` for `spx2.pdf`, `260101TESTCC03` for `spx1.pdf`;
+Run `npm run dev -- --port 5173` in the background. With the Playwright MCP tools (load `browser_file_upload` through ToolSearch), open `http://localhost:5173`, click the "Import PDF" tab and upload each of the four samples in turn into the file input. For each, verify with `browser_evaluate`:
+1. exactly one `.entry` (the right-hand slot is empty), whose title contains the expected order number: `260101TESTAA01` for `jne.pdf`, `260101TESTBB02` for `spx2.pdf`, `260101TESTCC03` for `spx1.pdf`, `261001TESTDD04` for `thermal.pdf` (an A6 portrait page, which is a single slot);
 2. the preview canvas is 576 pixels wide and more than 600 pixels tall, with more than 20000 dark pixels;
 3. unticking "Include product list" makes the preview shorter, and unticking "Add order barcode" makes it shorter again;
 4. no entry note mentions a missing order number.
 Then upload a non-PDF file (for example `docs/printer-findings.md`) and verify the status line starts with "Could not read the PDF" and the app still responds. Take a screenshot of the preview for the JNE and one SPX label and look for clipped or overlapping content.
-Expected: all four checks hold for all three files. Stop the dev server afterwards.
+Expected: all four checks hold for all four files. Stop the dev server afterwards.
 
 - [ ] **Step 9: Record the result**
 
@@ -1072,21 +1016,22 @@ Expected: all green.
 
 ---
 
-### Task 4: Barcode scan check
+### Task 4: Barcode scan check and automatic order barcode
 
 **Files:**
 - Create: `src/pdf/scanCheck.ts`, `src/pdf/zxingSetup.ts`, `tests/helpers/rasterize.ts`
 - Test: `tests/pdf/scanCheck.test.ts`
-- Modify: `src/app/importView.ts`, `src/app/style.css` (append)
+- Modify: `src/pdf/load.ts` (add `renderLabelReference`), `src/app/importView.ts` (full replacement below), `src/app/style.css` (append)
 
 **Interfaces:**
-- Consumes: `monoPreview`, `RgbaImage` (`src/encode/raster.ts`), `Layout` (`src/render/layout.ts`), `layoutDocument`, `LabelSource.resiNumber`/`orderNumber` (Task 3).
+- Consumes: `monoPreview`, `RgbaImage` (`src/encode/raster.ts`), `Layout`, `layoutDocument` (`src/render/layout.ts`), everything from Task 3.
 - Produces:
-  - `src/pdf/scanCheck.ts`: `interface ScanResult { found: string[]; missing: string[] }`; `compareScan(expected: string[], found: string[]): ScanResult`; `scanCheck(img: RgbaImage, expected: string[]): Promise<ScanResult>` (decodes Code 128 and QR codes from the thresholded image in strict mode)
+  - `src/pdf/scanCheck.ts`: `interface ScanResult { found: string[]; missing: string[] }`; `compareScan(expected: string[], found: string[]): ScanResult`; `readCodes(img: RgbaImage, mode: 'printed' | 'reference'): Promise<string[]>` (Code 128 and QR codes; `printed` thresholds the image to 1 bit and decodes in strict mode, `reference` decodes the image as given with every decoder effort enabled); `scanCheck(img: RgbaImage, expected: string[]): Promise<ScanResult>` (the `printed` read compared with the expectation)
   - `src/pdf/zxingSetup.ts`: `setupZXing(): Promise<unknown>`, browser-only; points the decoder at the bundled wasm file instead of its default CDN
+  - `src/pdf/load.ts`: `renderLabelReference(pdf, source): Promise<HTMLCanvasElement>` (the label area at 300 dpi)
   - `tests/helpers/rasterize.ts`: `rasterize(layout: Layout): RgbaImage`, drawing rects, QR modules and barcode bars on white
 
-The check runs on the exact 1-bit image that will print, so it also confirms that the app's own order barcode and QR encoders are readable by an independent decoder. The expected codes are the resi number (when found in the PDF text) and, when the order barcode strip was added, the order number. A missing expectation never blocks printing; it is shown in red next to the label.
+How the checks work. The reference is whatever a thorough decode of a 300 dpi render of the original label can read (on the A4 labels that is the tracking barcode, the QR code and the small order barcode; on the A6 thermal label it is the one order barcode and its QR code). The scan check then requires every one of those texts to be readable in the final 1-bit image, so it needs no text parsing and works for any layout. The order barcode option is `automatic` by default: the label is composed without the extra strip, decoded in `printed` mode, and the strip is added only when the order number is not already readable. A missing code never blocks printing; it is shown in red next to the label.
 
 - [ ] **Step 1: Install the decoder**
 
@@ -1140,7 +1085,7 @@ export function rasterize(layout: Layout): RgbaImage {
 Create `tests/pdf/scanCheck.test.ts`:
 ```ts
 import { describe, expect, it } from 'vitest'
-import { compareScan, scanCheck } from '../../src/pdf/scanCheck'
+import { compareScan, readCodes, scanCheck } from '../../src/pdf/scanCheck'
 import { layoutDocument } from '../../src/render/layout'
 import { rasterize } from '../helpers/rasterize'
 
@@ -1160,32 +1105,41 @@ describe('compareScan', () => {
   })
 })
 
-describe('scanCheck', () => {
+describe('readCodes and scanCheck', () => {
+  const layout = layoutDocument(
+    {
+      blocks: [
+        { type: 'barcode', data: '260101TESTAA01' },
+        { type: 'qr', data: 'SPXID000000000001' },
+      ],
+    },
+    measure,
+  )
+
   it('reads back a Code 128 barcode and a QR code drawn by the layout engine', async () => {
-    const layout = layoutDocument(
-      {
-        blocks: [
-          { type: 'barcode', data: '260101TESTAA01' },
-          { type: 'qr', data: 'SPXID000000000001' },
-        ],
-      },
-      measure,
-    )
     const result = await scanCheck(rasterize(layout), ['260101TESTAA01', 'SPXID000000000001'])
     expect(result.missing).toEqual([])
     expect(result.found.sort()).toEqual(['260101TESTAA01', 'SPXID000000000001'])
   })
 
+  it('reads the same codes in reference mode', async () => {
+    expect((await readCodes(rasterize(layout), 'reference')).sort()).toEqual([
+      '260101TESTAA01',
+      'SPXID000000000001',
+    ])
+  })
+
   it('reports an expected code that is not in the image', async () => {
-    const layout = layoutDocument({ blocks: [{ type: 'barcode', data: 'ABC12345' }] }, measure)
-    const result = await scanCheck(rasterize(layout), ['ABC12345', 'NOT-THERE'])
+    const result = await scanCheck(rasterize(layout), ['260101TESTAA01', 'NOT-THERE'])
     expect(result.missing).toEqual(['NOT-THERE'])
   })
 
   it('finds nothing in a blank image', async () => {
-    const layout = layoutDocument({ blocks: [{ type: 'spacer', height: 100 }] }, measure)
-    const result = await scanCheck(rasterize(layout), ['ABC12345'])
-    expect(result).toEqual({ found: [], missing: ['ABC12345'] })
+    const blank = layoutDocument({ blocks: [{ type: 'spacer', height: 100 }] }, measure)
+    expect(await scanCheck(rasterize(blank), ['ABC12345'])).toEqual({
+      found: [],
+      missing: ['ABC12345'],
+    })
   })
 })
 ```
@@ -1202,6 +1156,8 @@ Create `src/pdf/scanCheck.ts`:
 import { readBarcodes } from 'zxing-wasm/reader'
 import { monoPreview, type RgbaImage } from '../encode/raster'
 
+const FORMATS = ['Code128', 'QRCode'] as Array<'Code128' | 'QRCode'>
+
 // Strict decoding stands in for a basic handheld scanner: no extra effort,
 // rotation, inversion or downscaling.
 const STRICT = {
@@ -1209,7 +1165,15 @@ const STRICT = {
   tryRotate: false,
   tryInvert: false,
   tryDownscale: false,
-  formats: ['Code128', 'QRCode'] as Array<'Code128' | 'QRCode'>,
+  formats: FORMATS,
+  maxNumberOfSymbols: 8,
+}
+const THOROUGH = {
+  tryHarder: true,
+  tryRotate: true,
+  tryInvert: true,
+  tryDownscale: true,
+  formats: FORMATS,
   maxNumberOfSymbols: 8,
 }
 
@@ -1225,12 +1189,18 @@ export function compareScan(expected: string[], found: string[]): ScanResult {
   }
 }
 
-export async function scanCheck(img: RgbaImage, expected: string[]): Promise<ScanResult> {
-  const mono = { width: img.width, height: img.height, data: monoPreview(img) }
+// `printed` reads the image as the printer will reproduce it (1 bit, strict decoder);
+// `reference` reads a sharp render of the original with every decoder effort enabled.
+export async function readCodes(img: RgbaImage, mode: 'printed' | 'reference'): Promise<string[]> {
+  const input = mode === 'printed' ? { width: img.width, height: img.height, data: monoPreview(img) } : img
   // The decoder only reads width, height and data, so a plain object stands in
   // for the browser ImageData type that Node does not have.
-  const results = await readBarcodes(mono as unknown as ImageData, STRICT)
-  return compareScan(expected, results.map((result) => result.text))
+  const results = await readBarcodes(input as unknown as ImageData, mode === 'printed' ? STRICT : THOROUGH)
+  return results.map((result) => result.text)
+}
+
+export async function scanCheck(img: RgbaImage, expected: string[]): Promise<ScanResult> {
+  return compareScan(expected, await readCodes(img, 'printed'))
 }
 ```
 
@@ -1255,56 +1225,258 @@ export function setupZXing(): Promise<unknown> {
 }
 ```
 
+Append to `src/pdf/load.ts`:
+```ts
+const REFERENCE_DPI = 300
+
+// A sharp render of the whole label area, used only to find out which barcodes the original contains.
+export async function renderLabelReference(
+  pdf: PdfDocument,
+  source: LabelSource,
+): Promise<HTMLCanvasElement> {
+  const page = await pdf.getPage(source.pageNumber)
+  return renderRegion(page, source.bounds, REFERENCE_DPI / 72)
+}
+```
+
 - [ ] **Step 5: Run the tests and typecheck**
 
 Run: `npm test && npm run typecheck`
 Expected: all tests PASS, typecheck exits 0. If `readBarcodes` rejects the option object type, widen it with `as const` on the format list.
 
-- [ ] **Step 6: Show the scan result next to each label**
+- [ ] **Step 6: Replace the import view with the automatic order barcode and the scan result**
 
-In `src/app/importView.ts`, add these imports after the existing ones:
+Replace `src/app/importView.ts` with:
 ```ts
-import { scanCheck } from '../pdf/scanCheck'
+import { composeLabel } from '../pdf/compose'
+import {
+  extractLabels,
+  openPdf,
+  renderLabel,
+  renderLabelReference,
+  type LabelSource,
+  type PdfDocument,
+} from '../pdf/load'
+import { orderStripDocument } from '../pdf/orderStrip'
+import { readCodes, scanCheck } from '../pdf/scanCheck'
 import { setupZXing } from '../pdf/zxingSetup'
-```
-Add `scan: HTMLElement` to `interface Entry`, create it in `makeEntry` and include it in the row:
-```ts
+import { renderDocument } from '../render/render'
+import { el, field } from './dom'
+import { drawMonoPreview } from './monoCanvas'
+
+export interface ImportView {
+  element: HTMLElement
+  onChange(cb: () => void): void
+  previewCanvas(): HTMLCanvasElement | null
+  selectedCount(): number
+  renderSelected(): Promise<HTMLCanvasElement[]>
+}
+
+interface Entry {
+  source: LabelSource
+  row: HTMLElement
+  include: HTMLInputElement
+  thumb: HTMLCanvasElement
+  note: HTMLElement
+  scan: HTMLElement
+  canvas: HTMLCanvasElement | null
+  reference: Promise<string[]> | null
+}
+
+const message = (err: unknown) => (err instanceof Error ? err.message : String(err))
+const imageOf = (canvas: HTMLCanvasElement) =>
+  canvas.getContext('2d')!.getImageData(0, 0, canvas.width, canvas.height)
+
+export function createImportView(): ImportView {
+  const listeners: Array<() => void> = []
+  const notify = () => listeners.forEach((cb) => cb())
+  let pdf: PdfDocument | null = null
+  let entries: Entry[] = []
+  let previewIndex = 0
+  let fileToken = 0
+  let generation = 0
+  let rendering: Promise<void> = Promise.resolve()
+
+  const fileInput = el('input', { type: 'file', accept: 'application/pdf,.pdf' })
+  const includeProducts = el('input', { type: 'checkbox', checked: true })
+  const orderMode = el('select', {}, [
+    el('option', { value: 'auto', textContent: 'Automatic (only when needed)' }),
+    el('option', { value: 'always', textContent: 'Always' }),
+    el('option', { value: 'never', textContent: 'Never' }),
+  ])
+  const statusEl = el('p', {
+    className: 'import-status',
+    textContent: 'Choose a Shopee shipping label PDF.',
+  })
+  const list = el('div', { className: 'import-list' })
+
+  function markPreview(): void {
+    entries.forEach((entry, i) => entry.row.classList.toggle('preview', i === previewIndex))
+  }
+
+  function makeEntry(source: LabelSource): Entry {
+    const include = el('input', { type: 'checkbox', checked: true })
+    const where = source.slotCount > 1 ? (source.slotIndex === 0 ? ', left' : ', right') : ''
+    const order = source.orderNumber ? ` - order ${source.orderNumber}` : ''
+    const title = el('span', { textContent: `Page ${source.pageNumber}${where}${order}` })
+    const thumb = el('canvas', { className: 'thumb' })
+    const note = el('p', { className: 'note' })
     const scan = el('p', { className: 'scan' })
     const row = el('div', { className: 'entry' }, [el('label', {}, [include, title]), thumb, note, scan])
-    const entry: Entry = { source, row, include, thumb, note, scan, canvas: null }
-```
-Change `build` to also return the codes it expects, by replacing its return statement and adding an `expected` list:
-```ts
-    const expected = [entry.source.resiNumber, strip ? entry.source.orderNumber : null].filter(
-      (value): value is string => value !== null,
-    )
-    return { canvas: composeLabel(label, strip), notes, expected }
-```
-and its return type with `{ canvas: HTMLCanvasElement; notes: string[]; expected: string[] }`. Add this helper above `renderAll`:
-```ts
-  async function checkScan(entry: Entry, canvas: HTMLCanvasElement, expected: string[]): Promise<void> {
-    entry.scan.className = 'scan'
-    if (expected.length === 0) {
-      entry.scan.textContent = 'Scan check skipped: no tracking number found in the PDF text.'
-      return
+    const entry: Entry = { source, row, include, thumb, note, scan, canvas: null, reference: null }
+    include.addEventListener('change', notify)
+    thumb.addEventListener('click', () => {
+      previewIndex = entries.indexOf(entry)
+      markPreview()
+      notify()
+    })
+    return entry
+  }
+
+  async function build(
+    entry: Entry,
+    doc: PdfDocument,
+  ): Promise<{ canvas: HTMLCanvasElement; notes: string[] }> {
+    const notes: string[] = []
+    const label = await renderLabel(doc, entry.source, { includeProducts: includeProducts.checked })
+    const order = entry.source.orderNumber
+    const stripDoc = order ? orderStripDocument(order) : null
+    const mode = orderMode.value
+    let withStrip = false
+    if (mode !== 'never') {
+      if (!order) {
+        notes.push('No order number found in the PDF text, so no order barcode was added.')
+      } else if (!stripDoc) {
+        notes.push(`Order number ${order} cannot be drawn as a Code 128 barcode at this width.`)
+      } else if (mode === 'always') {
+        withStrip = true
+      } else {
+        try {
+          await setupZXing()
+          const { missing } = await scanCheck(imageOf(composeLabel(label, null)), [order])
+          withStrip = missing.length > 0
+          if (!withStrip) {
+            notes.push(`The label's own barcode already reads ${order}, so no extra barcode was added.`)
+          }
+        } catch {
+          withStrip = true
+        }
+      }
     }
+    return { canvas: composeLabel(label, withStrip && stripDoc ? renderDocument(stripDoc) : null), notes }
+  }
+
+  async function checkScan(entry: Entry, canvas: HTMLCanvasElement, doc: PdfDocument): Promise<void> {
+    entry.scan.className = 'scan'
     entry.scan.textContent = 'Checking barcodes...'
     try {
       await setupZXing()
-      const img = canvas.getContext('2d')!.getImageData(0, 0, canvas.width, canvas.height)
-      const { missing } = await scanCheck(img, expected)
+      entry.reference ??= renderLabelReference(doc, entry.source).then((reference) =>
+        readCodes(imageOf(reference), 'reference'),
+      )
+      const expected = [...new Set(await entry.reference)]
+      if (expected.length === 0) {
+        entry.scan.textContent = 'Scan check skipped: no barcode could be read from the original PDF.'
+        return
+      }
+      const { missing } = await scanCheck(imageOf(canvas), expected)
       if (missing.length === 0) {
-        entry.scan.textContent = `Scan check passed: ${expected.join(', ')} readable.`
+        entry.scan.textContent = `Scan check passed: ${expected.join(', ')} readable in the printed image.`
       } else {
         entry.scan.className = 'scan fail'
-        entry.scan.textContent = `Scan check FAILED: could not read ${missing.join(', ')} from the printed image.`
+        entry.scan.textContent = `Scan check FAILED: could not read ${missing.join(', ')} in the printed image.`
       }
     } catch (err) {
       entry.scan.textContent = `Scan check unavailable: ${message(err)}`
     }
   }
+
+  function renderAll(): Promise<void> {
+    const mine = ++generation
+    const target = pdf
+    rendering = (async () => {
+      if (!target) return
+      for (const entry of entries) {
+        try {
+          const { canvas, notes } = await build(entry, target)
+          if (mine !== generation) return
+          entry.canvas = canvas
+          drawMonoPreview(canvas, entry.thumb)
+          entry.note.textContent = notes.join(' ')
+          await checkScan(entry, canvas, target)
+          if (mine !== generation) return
+        } catch (err) {
+          if (mine !== generation) return
+          entry.canvas = null
+          entry.note.textContent = `Could not render this label: ${message(err)}`
+        }
+      }
+      if (mine === generation) notify()
+    })()
+    return rendering
+  }
+
+  fileInput.addEventListener('change', async () => {
+    const token = ++fileToken
+    generation++
+    pdf = null
+    entries = []
+    previewIndex = 0
+    list.replaceChildren()
+    const file = fileInput.files?.[0]
+    if (!file) {
+      statusEl.textContent = 'Choose a Shopee shipping label PDF.'
+      notify()
+      return
+    }
+    statusEl.textContent = `Reading ${file.name}...`
+    notify()
+    try {
+      const opened = await openPdf(await file.arrayBuffer())
+      const sources = await extractLabels(opened)
+      if (token !== fileToken) return
+      pdf = opened
+      entries = sources.map(makeEntry)
+      list.replaceChildren(...entries.map((entry) => entry.row))
+      markPreview()
+      statusEl.textContent =
+        sources.length === 0
+          ? 'No labels found: the pages look blank.'
+          : `${sources.length} label${sources.length === 1 ? '' : 's'} found.`
+      notify()
+      await renderAll()
+    } catch (err) {
+      if (token !== fileToken) return
+      statusEl.textContent = `Could not read the PDF: ${message(err)}`
+      notify()
+    }
+  })
+  includeProducts.addEventListener('change', () => void renderAll())
+  orderMode.addEventListener('change', () => void renderAll())
+
+  const element = el('div', { className: 'form' })
+  element.append(
+    field('PDF file', fileInput),
+    field('Include product list', includeProducts),
+    field('Order barcode', orderMode),
+    statusEl,
+    list,
+  )
+
+  return {
+    element,
+    onChange: (cb) => {
+      listeners.push(cb)
+    },
+    previewCanvas: () => entries[previewIndex]?.canvas ?? null,
+    selectedCount: () => entries.filter((e) => e.include.checked && e.canvas !== null).length,
+    renderSelected: async () => {
+      await rendering
+      return entries.flatMap((e) => (e.include.checked && e.canvas ? [e.canvas] : []))
+    },
+  }
+}
 ```
-In `renderAll`, destructure `expected` from `await build(...)` and call `await checkScan(entry, canvas, expected)` right after `entry.note.textContent = notes.join(' ')`, guarded by `if (mine !== generation) return` afterwards.
 
 Append to `src/app/style.css`:
 ```css
@@ -1321,20 +1493,23 @@ Expected: typecheck exits 0, all tests PASS, build succeeds.
 
 ```bash
 git add package.json package-lock.json src tests
-git commit -m "feat: check that imported labels still scan after fitting"
+git commit -m "feat: check that imported labels still scan after fitting and add the order barcode only when needed"
 ```
 
 - [ ] **Step 9: Browser smoke check of the scan result**
 
-With the dev server running and the samples still in `.playwright-mcp/samples/`, upload each sample on the Import PDF tab and read the `.scan` text of its entry.
-Expected: each reads `Scan check passed:` followed by its codes, which are the resi and the order number: `CM00000000001, 260101TESTAA01` for `jne.pdf`, `SPXID000000000001, 260101TESTBB02` for `spx2.pdf`, `SPXID000000000002, 260101TESTCC03` for `spx1.pdf`. Then untick "Add order barcode" and check the line drops the order number. If a tracking barcode fails the check in the browser render although the earlier poppler test passed, record that in `docs/printer-findings.md` and stop to decide before continuing, because it means pdf.js scales the embedded image differently. Remove the copied samples from `.playwright-mcp/samples/` when done, then stop the dev server.
+With the dev server running and the samples still in `.playwright-mcp/samples/`, upload each sample on the Import PDF tab with "Order barcode" on Automatic and read the entry's `.note` and `.scan` text.
+Expected, per sample:
+- `jne.pdf`, `spx2.pdf`, `spx1.pdf` (A4): no "already reads" note, because the small order barcode does not survive the shrink and an extra barcode is added; the scan line reads `Scan check passed:` and lists the tracking number and the order number (`CM00000000001, 260101TESTAA01`, `SPXID000000000001, 260101TESTBB02`, `SPXID000000000002, 260101TESTCC03`).
+- `thermal.pdf` (A6): the note says the label's own barcode already reads `261001TESTDD04`, no extra barcode is added (the preview is shorter than with "Always"), and the scan line reads `Scan check passed: 261001TESTDD04`.
+Then switch "Order barcode" to Never on an A4 sample and check the scan line turns red naming the order number. If a barcode that decoded under poppler fails in the browser render, record that in `docs/printer-findings.md` and stop to decide before continuing, because it means pdf.js scales the embedded image differently. Remove the copied samples from `.playwright-mcp/samples/` when done, then stop the dev server.
 
 ---
 
 ## Self-review
 
-**Spec coverage.** Milestone 4 asks for PDF import with scale, crop and rotate, a preview and a warning when scaling is too aggressive. Trim (content bounds) and scale-to-fit are Tasks 1 and 3; the product-table crop is an option in Task 3; the preview is the existing 1-bit preview pane fed from the selected entry; the scale warning is replaced by a stronger check, decoding the final 1-bit image (Task 4). Rotation is not built: the sample pages are already upright and a landscape page is treated as two side-by-side slots, so a rotate control is left for a later plan if a layout needs it. The owner's choices are honored: a scannable order barcode is drawn below each label (Task 2 and 3), the product table is kept by default with a toggle, and the A4 layout is the target while a thermal 10x15 layout would also work because the importer fits whatever width it finds.
+**Spec coverage.** Milestone 4 asks for PDF import with scale, crop and rotate, a preview and a warning when scaling is too aggressive. Trim (content bounds) and scale-to-fit are Tasks 1 and 3; the product-table crop is an option in Task 3; the preview is the existing 1-bit preview pane fed from the selected entry; the scale warning is replaced by a stronger check, decoding the final 1-bit image against what the original contains (Task 4). Rotation is not built: the sample pages are already upright and a landscape page is treated as two side-by-side slots, so a rotate control is left for a later plan if a layout needs it. The owner's choices are honored: a scannable order barcode is drawn under each label when the label's own barcode would not scan (automatic by default, with always and never), the product table is kept by default with a toggle, and both the A4 landscape and the A6 portrait thermal layouts are supported because the importer fits whatever width it finds.
 
 **Placeholders.** None; every code step has complete code and every run step has a command and expected result. The two places that depend on library typing (`page.render` arguments and the `readBarcodes` options) state the concrete fallback.
 
-**Type consistency.** `Rect`, `GrayImage`, `TextItem`, `LabelSource`, `PdfDocument`, `ImportView`, `ScanResult` and the functions `splitSlots`, `contentBounds`, `dotsPerPoint`, `findOrderNumber`, `findResiNumber`, `productTableTop`, `orderStripDocument`, `extractLabels`, `renderLabel`, `composeLabel`, `drawMonoPreview`, `scanCheck` use the same names and signatures wherever they appear. `build` gains an `expected` field in Task 4, and the Task 3 code is the base it edits.
+**Type consistency.** `Rect`, `GrayImage`, `TextItem`, `LabelSource`, `PdfDocument`, `ImportView`, `ScanResult` and the functions `splitSlots`, `contentBounds`, `dotsPerPoint`, `findOrderNumber`, `productTableTop`, `orderStripDocument`, `extractLabels`, `renderLabel`, `renderLabelReference`, `composeLabel`, `drawMonoPreview`, `readCodes`, `scanCheck` use the same names and signatures wherever they appear. Task 4 replaces the whole of `importView.ts` from Task 3, so the two versions only share the exported `ImportView` interface.

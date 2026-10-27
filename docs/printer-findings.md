@@ -145,3 +145,11 @@ Scan test with the zxing-wasm decoder in strict mode (no try-harder, rotate, inv
 - The small order-number barcode decodes at 300 dpi but not at the target size.
 
 This is software decoding of a clean raster. Whether a courier's handheld scanner reads the printed slip is untested. If it does not, the fallback is to read the tracking number from the PDF text layer and redraw the barcode with the app's own Code 128 encoder at an integer module width.
+
+### Shopee A6 thermal-format label (2026-10-27)
+
+A fourth sample, an SPX Instant/Same-day label from the "Shopee Seller Centre" print view, is a single A6 portrait page (297 x 419 pt, made by PDFium). The label fills the page width, so its content is about 100 x 92 mm, and fitting it to 552 dots scales it to about 69 percent of native (the A4 layouts scale to about 49 percent). It has no tracking-number line: the large Code 128 barcode and the QR code both encode the order number (shown in the text layer as `No. Pesanan: ...`). The product table header `Nama Produk` is present.
+
+The same scan test as the A4 labels: the barcode and the QR code decode with the strict decoder at 552 dots wide and at every 1-bit threshold from 80 to 200. A full one-dot growth or shrink of every edge breaks both. Barcode bars come out about 2.4 dots wide, the same as the A4 labels, because the barcode is a smaller share of this label.
+
+Consequences for the importer: the order-number barcode needs to be added only when the label's own barcodes do not already read the order number after fitting, and the scan check should compare against whatever codes the original PDF contains instead of assuming a tracking-number line.
