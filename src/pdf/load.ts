@@ -11,12 +11,8 @@ import {
   type GrayImage,
   type Rect,
 } from './geometry'
-import {
-  findOrderNumber,
-  itemsInRect,
-  productTableTop,
-  type TextItem,
-} from './labelText'
+import { findOrderNumber, itemsInRect, productTableTop } from './labelText'
+import { collectTextItems } from './textItems'
 
 pdfjs.GlobalWorkerOptions.workerSrc = workerUrl
 
@@ -100,8 +96,7 @@ export async function extractLabels(pdf: PdfDocument): Promise<LabelSource[]> {
   for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber++) {
     const page = await pdf.getPage(pageNumber)
     const base = page.getViewport({ scale: 1 })
-    const text = await page.getTextContent()
-    const items: TextItem[] = text.items.flatMap((item) => ('str' in item ? [item] : []))
+    const items = await collectTextItems(page.streamTextContent())
     let slots = splitSlots(base.width, base.height)
     let found = await detectBounds(page, slots)
     const [left, right] = found

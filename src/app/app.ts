@@ -22,7 +22,7 @@ export function createApp(root: HTMLElement): void {
     label: createLabelForm(),
     import: createImportView(),
   }
-  let mode: Mode = 'receipt'
+  let mode: Mode = 'import'
   let current: HTMLCanvasElement | null = null
   let abort: AbortController | null = null
   let busy = false
@@ -33,9 +33,9 @@ export function createApp(root: HTMLElement): void {
     <header>
       <h1>bt-printer</h1>
       <nav>
-        <button data-mode="receipt">Receipt</button>
-        <button data-mode="label">Shipping label</button>
         <button data-mode="import">Import PDF</button>
+        <button data-mode="label">Shipping label</button>
+        <button data-mode="receipt">Receipt</button>
       </nav>
     </header>
     <div class="cols">
@@ -209,5 +209,5 @@ export function createApp(root: HTMLElement): void {
     log('Cancelling after the current band')
   })
 
-  setMode('receipt')
+  setMode('import')
 }

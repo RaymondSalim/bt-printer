@@ -153,3 +153,9 @@ A fourth sample, an SPX Instant/Same-day label from the "Shopee Seller Centre" p
 The same scan test as the A4 labels: the barcode and the QR code decode with the strict decoder at 552 dots wide and at every 1-bit threshold from 80 to 200. A full one-dot growth or shrink of every edge breaks both. Barcode bars come out about 2.4 dots wide, the same as the A4 labels, because the barcode is a smaller share of this label.
 
 Consequences for the importer: the order-number barcode needs to be added only when the label's own barcodes do not already read the order number after fitting, and the scan check should compare against whatever codes the original PDF contains instead of assuming a tracking-number line.
+
+## iOS Safari compatibility (2026-10-31)
+
+Web Bluetooth works on an iPad and an iPhone through Bluefy (the printer connects). The PDF import failed on an iPhone with `undefined is not a function (near '...e of t...')`, located in pdf.js `getTextContent`, which iterates a `ReadableStream` with `for await`. Safari versions without async-iterable streams cannot run that, and pdf.js's legacy build does not polyfill it. The importer therefore reads text through `streamTextContent()` and `getReader()` (`src/pdf/textItems.ts`). The other two `for await` loops in the pdf.js bundles are not on the import path: one belongs to the signature editor, and the one in the worker sits inside a try/catch that falls back to a JavaScript decompressor.
+
+Reproduce the failure condition in any Chromium browser with `delete ReadableStream.prototype[Symbol.asyncIterator]` before importing: pdf.js `getTextContent` then throws `readableStream is not async iterable` while the app's import still works. Unexpected import errors show their first two stack frames in the status line, which is the only diagnostic available on a phone.
