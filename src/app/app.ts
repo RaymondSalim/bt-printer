@@ -169,6 +169,9 @@ export function createApp(root: HTMLElement): void {
     busy = true
     progress.value = 0
     updateButtons()
+    // Counted so a failure can say how many writes the browser accepted and how fast.
+    let writes = 0
+    const startedAt = performance.now()
     try {
       for (const [index, canvas] of canvases.entries()) {
         if (canvases.length > 1) log(`Printing label ${index + 1} of ${canvases.length}`)
@@ -177,9 +180,12 @@ export function createApp(root: HTMLElement): void {
           confirmWarnings: async (warnings) =>
             window.confirm(`${warnings.join('\n')}\n\nPrint anyway?`),
           onProgress: (sent, total) => {
+            writes++
             progress.max = total
             progress.value = sent
           },
+          onRateLimited: (waitMs) =>
+            log(`Bluetooth layer throttled the writes; waiting ${waitMs} ms and slowing down`),
           signal: abort.signal,
           resyncFirst: needsResync,
         })
@@ -193,7 +199,10 @@ export function createApp(root: HTMLElement): void {
     } catch (err) {
       if (err instanceof PrintInterruptedError) {
         if (err.reason === 'write-failed') needsResync = true
-        log(`Print ${err.reason} after ${err.bytesSent} of ${err.totalBytes} bytes; cause: ${String(err.cause)}`)
+        const seconds = ((performance.now() - startedAt) / 1000).toFixed(1)
+        log(
+          `Print ${err.reason} after ${err.bytesSent} of ${err.totalBytes} bytes (${writes} writes in ${seconds} s); cause: ${String(err.cause)}`,
+        )
       } else {
         log(`Print failed: ${message(err)}`)
       }

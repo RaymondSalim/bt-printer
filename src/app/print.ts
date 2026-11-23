@@ -11,6 +11,7 @@ export interface PrintOptions {
   signal?: AbortSignal
   feedLines?: number
   resyncFirst?: boolean
+  onRateLimited?(waitMs: number): void
   sleep?(ms: number): Promise<void>
 }
 
@@ -54,6 +55,7 @@ export async function printImage(
   if (warnings.length > 0 && !(await opts.confirmWarnings(warnings))) return 'cancelled'
   await sendBytes(link, job, {
     onProgress: opts.onProgress,
+    onRateLimited: opts.onRateLimited,
     signal: opts.signal,
     sleep: opts.sleep,
   })

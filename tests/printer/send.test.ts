@@ -137,3 +137,74 @@ describe('sendBytes', () => {
     expect(writes[0][0]).toBe(7)
   })
 })
+
+describe('sendBytes when the browser throttles Bluetooth requests', () => {
+  const rateLimit = () =>
+    Object.assign(new Error('Rate limit exceeded: too many BLE requests'), { name: 'SecurityError' })
+
+  function throttledSink(failures: number) {
+    const writes: Uint8Array[] = []
+    let remaining = failures
+    const sink: ByteSink = {
+      async write(data) {
+        if (remaining > 0) {
+          remaining--
+          throw rateLimit()
+        }
+        writes.push(data)
+      },
+    }
+    return { sink, writes }
+  }
+
+  it('waits and retries the same chunk, writing every byte exactly once and in order', async () => {
+    const { sink, writes } = throttledSink(2)
+    const waits: number[] = []
+    await sendBytes(sink, [bytes(450, 3)], {
+      chunkSize: 200,
+      delayMs: 0,
+      sleep: async (ms) => {
+        waits.push(ms)
+      },
+      onRateLimited: (ms) => waits.push(-ms),
+    })
+    expect(writes.map((w) => w.length)).toEqual([200, 200, 50])
+    expect(writes.every((w) => w.every((b) => b === 3))).toBe(true)
+    expect(waits.filter((w) => w < 0)).toEqual([-500, -1000])
+  })
+
+  it('spaces the remaining writes further apart after being throttled', async () => {
+    const { sink } = throttledSink(1)
+    const delays: number[] = []
+    await sendBytes(sink, [bytes(600)], {
+      chunkSize: 200,
+      delayMs: 10,
+      sleep: async (ms) => {
+        delays.push(ms)
+      },
+    })
+    expect(delays).toEqual([500, 50, 50])
+  })
+
+  it('gives up with a write-failed error once the backoff is used up', async () => {
+    const { sink, writes } = throttledSink(Infinity)
+    const err = await sendBytes(sink, [bytes(400)], { chunkSize: 200, sleep: noSleep }).catch((e) => e)
+    expect(err).toBeInstanceOf(PrintInterruptedError)
+    expect(err).toMatchObject({ reason: 'write-failed', bytesSent: 0, totalBytes: 400 })
+    expect((err.cause as Error).name).toBe('SecurityError')
+    expect(writes).toHaveLength(0)
+  })
+
+  it('still fails at once on an error that is not a rate limit', async () => {
+    const { sink } = recordingSink(1)
+    const waits: number[] = []
+    await expect(
+      sendBytes(sink, [bytes(400)], {
+        chunkSize: 200,
+        sleep: noSleep,
+        onRateLimited: (ms) => waits.push(ms),
+      }),
+    ).rejects.toMatchObject({ reason: 'write-failed' })
+    expect(waits).toEqual([])
+  })
+})

@@ -14,6 +14,7 @@ export interface SendOptions {
   onProgress?: (sent: number, total: number) => void
   signal?: AbortSignal
   sleep?: (ms: number) => Promise<void>
+  onRateLimited?: (waitMs: number) => void
 }
 
 export class PrintInterruptedError extends Error {
@@ -29,6 +30,18 @@ export class PrintInterruptedError extends Error {
     )
     this.name = 'PrintInterruptedError'
   }
+}
+
+// Some browsers' Bluetooth layers (for example the iOS Safari extension Beacio) refuse writes
+// once too many arrive in a short time. The refused write never reached the printer, so it is
+// safe to wait and send the same chunk again.
+const RATE_LIMIT_BACKOFF_MS = [500, 1000, 2000, 4000, 8000]
+const MIN_EXTRA_DELAY_MS = 40
+const MAX_EXTRA_DELAY_MS = 320
+
+export function isRateLimitError(err: unknown): boolean {
+  const message = typeof err === 'object' && err !== null && 'message' in err ? String(err.message) : ''
+  return /rate limit|too many (ble )?requests/i.test(message)
 }
 
 const defaultSleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms))
@@ -65,22 +78,33 @@ export async function sendBytes(
   const total = steps.reduce((sum, s) => sum + s.chunk.length, 0)
 
   let sent = 0
+  // Grows each time the browser throttles us and stays for the rest of the job.
+  let extraDelayMs = 0
   for (let i = 0; i < steps.length; i++) {
     // An abort is honored only between parts. Stopping inside a raster band would
     // leave the printer waiting for the rest of that command and swallow the next job.
     if (steps[i].startsPart && opts.signal?.aborted) {
       throw new PrintInterruptedError('aborted', sent, total, opts.signal.reason)
     }
-    try {
-      await sink.write(steps[i].chunk)
-    } catch (cause) {
-      throw new PrintInterruptedError('write-failed', sent, total, cause)
+    for (let attempt = 0; ; attempt++) {
+      try {
+        await sink.write(steps[i].chunk)
+        break
+      } catch (cause) {
+        if (!isRateLimitError(cause) || attempt >= RATE_LIMIT_BACKOFF_MS.length) {
+          throw new PrintInterruptedError('write-failed', sent, total, cause)
+        }
+        const waitMs = RATE_LIMIT_BACKOFF_MS[attempt]
+        extraDelayMs = Math.min(Math.max(extraDelayMs * 2, MIN_EXTRA_DELAY_MS), MAX_EXTRA_DELAY_MS)
+        opts.onRateLimited?.(waitMs)
+        await sleep(waitMs)
+      }
     }
     sent += steps[i].chunk.length
     opts.onProgress?.(sent, total)
 
     if (i < steps.length - 1) {
-      await sleep(delayMs)
+      await sleep(delayMs + extraDelayMs)
       if (steps[i].endsPart && partPauseMs > 0) await sleep(partPauseMs)
     }
   }

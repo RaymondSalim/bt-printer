@@ -167,3 +167,11 @@ The printer has two width modes, switched from the printer itself (owner-reporte
 How it showed up: a printed Shopee label occupied only the right two thirds of the paper on every device (iPhone, Mac, Android), so the job was not at fault. The raster ruler (`tools/ble-probe/bleruler.py`, or "Print ruler" on `/spike.html`) printed starting a third of the way in and stopped at the 48 mm mark. The identification replies (`GS I`) and status bytes were identical in both modes, and `GS L`, `GS W`, `ESC a` and `ESC $` did not change where graphics land, so the mode cannot be detected or overridden from the app. The text-mode default of 192 dots seen on the first day is the same window. Switching the printer back to the 80 mm mode restored full-width printing.
 
 If a print is shifted right and cut off at 48 mm, check the printer's mode first.
+
+## Beacio on iOS throttles Bluetooth writes (2026-11-23)
+
+Printing through the Beacio Safari extension failed partway with `SecurityError: Rate limit exceeded: too many BLE requests` after 11383 of 53834 bytes, which is about 48 data writes plus four status queries within roughly four seconds. The throttle belongs to the closed iOS extension. Its SDK repository and documentation give no limit values, and its "write limits" API only reports payload sizes (maximum bytes per write and MTU). The same job prints through Chrome on a Mac and Android.
+
+`sendBytes` now treats that error as a request to slow down. The refused write never reached the printer, so it waits (500, 1000, 2000, 4000, then 8000 ms) and sends the same chunk again, and after any throttling it adds 40 ms, doubling up to 320 ms, to every later gap between writes for the rest of the job. A job that is still refused after the last wait fails as before. The app logs each throttling event, and a failed print now reports how many writes the browser accepted and over how many seconds, which is what is needed to find the actual budget.
+
+Not verified on an iPhone. If throttled printing proves too slow or unreliable, the alternatives are Bluefy or WebBLE (a closed free browser and the open-source paid browser, neither of which has shown a limit) or fewer, larger writes if the printer accepts writes longer than its 237-byte MTU payload.
